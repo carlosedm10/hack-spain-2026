@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from urllib.error import URLError
@@ -17,11 +16,6 @@ from urllib.request import Request, urlopen
 
 MARKER = "__hs_event__"
 LOG_ROOT = Path(__file__).resolve().parents[1] / ".local" / "harness"
-BLOCK_LEVEL = 3
-
-
-def decisions_root() -> Path:
-    return LOG_ROOT / "decisions"
 
 
 def valid_event(event: object, run_id: str) -> bool:
@@ -30,34 +24,10 @@ def valid_event(event: object, run_id: str) -> bool:
     if not isinstance(event.get("event"), str) or not event["event"]:
         return False
     ts = event.get("ts")
-    if not isinstance(ts, (int, float)) or not math.isfinite(ts):
-        return False
-    if "capture_id" in event or event["event"] in ("tool_call_pending", "tool_call_blocked"):
-        capture_id = event.get("capture_id")
-        if not isinstance(capture_id, str) or not re.fullmatch(r"[a-f0-9]{32}", capture_id):
-            return False
-    if "tool_call_id" in event or event["event"] in ("tool_call_pending", "tool_call_blocked"):
-        tool_call_id = event.get("tool_call_id")
-        if not isinstance(tool_call_id, str) or not re.fullmatch(
-            r"[A-Za-z0-9._-]{1,128}", tool_call_id
-        ):
-            return False
-    if event["event"] == "tool_call_pending":
-        return (
-            isinstance(event.get("tool"), str)
-            and event["tool"]
-            and isinstance(event.get("args"), dict)
-            and isinstance(event.get("args_redacted"), bool)
-            and isinstance(event.get("digest"), str)
-            and re.fullmatch(r"[a-f0-9]{64}", event["digest"]) is not None
-            and event.get("status") == "pending"
-        )
-    return True
+    return isinstance(ts, (int, float)) and math.isfinite(ts)
 
 
 def identity(event: dict) -> str:
-    if "capture_id" in event:
-        return json.dumps([event["capture_id"], event["event"], event.get("tool_call_id")])
     return hashlib.sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
 
 
@@ -70,32 +40,6 @@ def forward(api: str, run_id: str, event: dict) -> dict:
     )
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read())
-
-
-def decide(verdict: dict | None) -> bool:
-    return (
-        verdict is not None
-        and not verdict.get("degraded", True)
-        and int(verdict.get("level", BLOCK_LEVEL)) < BLOCK_LEVEL
-    )
-
-
-def write_decision(event: dict, verdict: dict | None) -> None:
-    directory = decisions_root() / event["capture_id"]
-    directory.mkdir(mode=0o755, parents=True, exist_ok=True)
-    os.chmod(directory, 0o755)
-    decision = {
-        "approved": decide(verdict),
-        "digest": event["digest"],
-        "level": verdict and verdict.get("level"),
-        "intent": verdict and verdict.get("intent"),
-        "degraded": verdict is None or verdict.get("degraded", True),
-    }
-    fd, temp = tempfile.mkstemp(dir=directory, prefix=f"{event['tool_call_id']}.")
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(json.dumps(decision))
-    os.chmod(temp, 0o644)
-    os.replace(temp, directory / f"{event['tool_call_id']}.json")
 
 
 def collect(lines: Iterable[str], path: Path, run_id: str, api: str) -> None:
@@ -125,14 +69,11 @@ def collect(lines: Iterable[str], path: Path, run_id: str, api: str) -> None:
             os.fsync(tape.fileno())
             seen.add(key)
             try:
-                verdict = forward(api, run_id, event)
+                forward(api, run_id, event)
             except (URLError, TimeoutError, ValueError):
-                verdict = None
                 print(
                     "collector: event delivery failed; event retained", file=sys.stderr
                 )
-            if event["event"] == "tool_call_pending":
-                write_decision(event, verdict)
 
 
 def main(container: str, run_id: str, api: str) -> None:

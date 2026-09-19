@@ -194,12 +194,10 @@ test:
 
 agents-build:
 	@echo ":: agents-build: compose.agents.yaml"
-	mkdir -p .local/harness/decisions .local/runs
 	docker compose -f compose.agents.yaml up --build -d
 
 agents-up:
 	@echo ":: agents-up: compose.agents.yaml"
-	mkdir -p .local/harness/decisions .local/runs
 	docker compose -f compose.agents.yaml up -d
 
 agents-down:

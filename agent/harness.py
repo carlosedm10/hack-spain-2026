@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import httpx
 from pydantic_ai import Agent
+from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -406,32 +407,33 @@ async def schedule_callback(counterparty: str) -> str:
     )
 
 
-model = OpenAIChatModel(
-    os.environ.get("AGENT_MODEL", "deepseek-v4-flash"),
-    provider=OpenAIProvider(
-        base_url=_env("HELMCODE_BASE_URL", "https://api.helmcode.com/v1"),
-        api_key=_env("HELMCODE_API_KEY"),
-    ),
-)
-
-agent = Agent(
-    model,
-    system_prompt=SYSTEM,
-    tools=[
-        shell,
-        read_file,
-        write_file,
-        http_request,
-        register_tool,
-        run_tool,
-        memory_write,
-        book_load,
-        schedule_callback,
-    ],
-)
+TOOLS = [
+    shell,
+    read_file,
+    write_file,
+    http_request,
+    register_tool,
+    run_tool,
+    memory_write,
+    book_load,
+    schedule_callback,
+]
 
 
-async def main() -> None:
+def build_agent(model: Model | None = None) -> Agent:
+    if model is None:
+        model = OpenAIChatModel(
+            os.environ.get("AGENT_MODEL", "deepseek-v4-flash"),
+            provider=OpenAIProvider(
+                base_url=_env("HELMCODE_BASE_URL", "https://api.helmcode.com/v1"),
+                api_key=_env("HELMCODE_API_KEY"),
+            ),
+        )
+    return Agent(model, system_prompt=SYSTEM, tools=TOOLS)
+
+
+async def main(model: Model | None = None) -> None:
+    agent = build_agent(model)
     emit("run_start", task=TASK)
     result = await agent.run(TASK)
     output = clip(str(result.output))
