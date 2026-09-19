@@ -30,14 +30,27 @@ def _record_watcher_contribution() -> None:
     _WATCHER_INVOCATIONS += 1
 
 
-async def evaluate(client: httpx.AsyncClient, run_id: str, event: dict[str, Any]) -> Verdict:
+async def evaluate(
+    client: httpx.AsyncClient,
+    run_id: str,
+    event: dict[str, Any],
+    *,
+    monitor_context: dict[str, Any] | None = None,
+) -> Verdict:
     from app.graph import graph
 
     prior = graph.level(run_id)
     state = _state(run_id, event, prior)
+    if monitor_context is not None:
+        state["monitor"] = monitor_context
     verdict = await _classify(client, state)
     if verdict.degraded:
-        return Verdict(level=prior, confidence=0.0, degraded=True)
+        return Verdict(
+            level=prior,
+            confidence=0.0,
+            degraded=True,
+            degraded_reason=verdict.degraded_reason,
+        )
     if verdict.confidence < settings.watcher_tau:
         _UNSURE_STREAKS[run_id] = _UNSURE_STREAKS.get(run_id, 0) + 1
         if _UNSURE_STREAKS[run_id] >= settings.watcher_persistence:
@@ -47,7 +60,12 @@ async def evaluate(client: httpx.AsyncClient, run_id: str, event: dict[str, Any]
                 _record_watcher_contribution()
                 verdict = await _classify(client, {**state, "watcher_note": note})
                 if verdict.degraded:
-                    return Verdict(level=prior, confidence=0.0, degraded=True)
+                    return Verdict(
+                        level=prior,
+                        confidence=0.0,
+                        degraded=True,
+                        degraded_reason=verdict.degraded_reason,
+                    )
     else:
         _UNSURE_STREAKS.pop(run_id, None)
     graph.append(
@@ -82,8 +100,9 @@ def _tape(run_id: str) -> list[dict[str, Any]]:
 async def _classify(client: httpx.AsyncClient, state: dict[str, Any]) -> Verdict:
     try:
         return await jev.classify(client, state)
-    except Exception:  # noqa: BLE001
-        return Verdict(level=Level.NONE, confidence=0.0, degraded=True)
+    except Exception as exc:  # noqa: BLE001
+        reason = "no_key" if "TYPESAFE_API_KEY" in str(exc) else "error"
+        return Verdict(level=Level.NONE, confidence=0.0, degraded=True, degraded_reason=reason)
 
 
 async def _watcher_note(
@@ -92,14 +111,16 @@ async def _watcher_note(
     try:
         review = await watcher.review(
             client,
-            {
-                "run_id": state["run_id"],
-                "prior_level": state["prior_level"],
-                "short_term": state["short_term"],
-                "long_term": state["long_term"],
-                "event": state["event"],
-                "jev": {"level": int(verdict.level), "confidence": verdict.confidence},
-            },
+            jev.serialize_state(
+                {
+                    "run_id": state["run_id"],
+                    "prior_level": state["prior_level"],
+                    "short_term": state["short_term"],
+                    "long_term": state["long_term"],
+                    "event": state["event"],
+                    "jev": {"level": int(verdict.level), "confidence": verdict.confidence},
+                }
+            ),
         )
     except Exception:  # noqa: BLE001
         return None

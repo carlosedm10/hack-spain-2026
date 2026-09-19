@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HackSpain monitor lab</title>
+  <link rel="stylesheet" href="/lab.css" />
+</head>
+<body>
+  <nav class="lab">
+    <strong>HackSpain monitor lab</strong>
+    <a class="on" href="/lab">Home</a>
+    <a href="/lab/conversation">Conversation</a>
+    <a href="/lab/benchmarks">Benchmarks</a>
+    <a href="/lab/inspector">Inspector</a>
+  </nav>
+  <div class="cards">
+    <a class="card" href="/lab/conversation">
+      <h2>Human ↔ Ultron</h2>
+      <p>Chat is Human vs Ultron speech only. Jarvis watches Ultron’s traces (including hidden writes) and the meters. Not a live agent.</p>
+    </a>
+    <a class="card" href="/lab/benchmarks">
+      <h2>Benchmarks</h2>
+      <p>Scientific suite through <code>service.ingest</code>. LIVE only if classify returned latency. Quick smoke is opt-in, not the number you pitch.</p>
+    </a>
+    <a class="card" href="/lab/inspector">
+      <h2>Inspector</h2>
+      <p>Graph + Markov debug view of the same replay ingest path (JSONL, Sentinel, gate, Neo4j, SSE).</p>
+    </a>
+  </div>
+</body>
+</html>

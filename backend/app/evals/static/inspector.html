@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Inspector — HackSpain lab</title>
+  <link rel="stylesheet" href="/lab.css" />
+</head>
+<body>
+  <nav class="lab">
+    <strong>HackSpain monitor lab</strong>
+    <a href="/lab">Home</a>
+    <a href="/lab/conversation">Conversation</a>
+    <a href="/lab/benchmarks">Benchmarks</a>
+    <a class="on" href="/lab/inspector">Inspector</a>
+  </nav>
+  <header class="ctrl">
+    <label>Cluster<select id="cluster"></select></label>
+    <label>Trace<select id="trace"></select></label>
+    <label>Delay ms<input id="delay" type="number" min="0" max="10000" value="800" style="width:72px" /></label>
+    <button id="start">Start replay</button>
+    <div id="badge" class="badge l0">L0</div>
+    <div id="status" class="status">idle</div>
+    <div id="runId" class="tiny"></div>
+  </header>
+  <main class="insp">
+    <div id="graphWrap"><svg id="svg" viewBox="0 0 800 600"></svg></div>
+    <div class="panel">
+      <h2>Drift / Markov</h2>
+      <div id="pv"></div>
+      <div class="bands" id="bands"></div>
+      <div class="markov" id="markov"></div>
+    </div>
+    <div class="panel" style="grid-column: 2">
+      <h2>Stream log</h2>
+      <div id="log"></div>
+    </div>
+  </main>
+  <script>
+    const BAND_KEYS = ["data_exposure", "tool_escalation", "reversibility", "authority_drift", "context_integrity", "blast_radius"];
+    const nodes = new Map();
+    const edges = [];
+    let layout = new Map();
+    let source = null;
+    let clusters = [];
+    const $ = (id) => document.getElementById(id);
+
+    function logLine(cls, text) {
+      const el = $("log");
+      const row = document.createElement("div");
+      row.className = cls;
+      row.textContent = text;
+      el.prepend(row);
+      while (el.childNodes.length > 120) el.lastChild.remove();
+    }
+
+    function setBadge(level, degraded) {
+      const b = $("badge");
+      b.textContent = "L" + level + (degraded ? " degraded" : "");
+      b.className = "badge l" + Math.min(5, level);
+    }
+
+    function renderBands(drift) {
+      if (!drift) return;
+      $("bands").innerHTML = BAND_KEYS.map((k) => {
+        const v = drift[k] ?? 0;
+        return `<div class="band">${k.replace(/_/g, " ").slice(0, 8)}: ${v}<span><i style="width:${v * 25}%"></i></span></div>`;
+      }).join("");
+      const pv = drift.p_violation || {};
+      $("pv").textContent = `p_violation h1=${(pv[1] ?? pv["1"] ?? 0).toFixed(3)} h3=${(pv[3] ?? pv["3"] ?? 0).toFixed(3)} h5=${(pv[5] ?? pv["5"] ?? 0).toFixed(3)}`;
+      const st = drift.markov_state || [0, 0];
+      const max = st[0], elev = st[1];
+      let html = "";
+      for (let e = 0; e < 7; e++) {
+        for (let m = 0; m < 5; m++) {
+          const on = m === max && e === elev ? " on" : "";
+          html += `<div class="${on}">${m},${e}</div>`;
+        }
+      }
+      $("markov").innerHTML = html;
+    }
+
+    function nodeColor(n) {
+      const labels = n.labels || [];
+      if (labels.includes("Run")) return "#446";
+      if (labels.includes("Assessment")) return "#664";
+      if (labels.includes("Entity")) return "#355";
+      const lvl = n.properties?.level ?? 0;
+      if (lvl >= 4) return "#c33";
+      if (lvl >= 3) return "#e55";
+      if (lvl >= 2) return "#e90";
+      if (lvl >= 1) return "#cc0";
+      return "#3a6";
+    }
+
+    function layoutGraph() {
+      const ids = [...nodes.keys()];
+      const w = 800, h = 600, pad = 40;
+      ids.forEach((id, i) => {
+        const col = i % 8;
+        const row = Math.floor(i / 8);
+        layout.set(id, { x: pad + col * ((w - 2 * pad) / 7), y: pad + row * 70 });
+      });
+    }
+
+    function drawGraph() {
+      layoutGraph();
+      const svg = $("svg");
+      let g = "";
+      edges.forEach((e) => {
+        const a = layout.get(e.source), b = layout.get(e.target);
+        if (!a || !b) return;
+        g += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#444" stroke-width="1"/>`;
+      });
+      nodes.forEach((n, id) => {
+        const p = layout.get(id);
+        if (!p) return;
+        const props = n.properties || n;
+        const fill = nodeColor(n);
+        const label = (props.kind || props.id || id).toString().slice(0, 12);
+        g += `<circle cx="${p.x}" cy="${p.y}" r="14" fill="${fill}" stroke="#fff" stroke-width="0.5"/>`;
+        g += `<text x="${p.x}" y="${p.y + 22}" fill="#888" font-size="8" text-anchor="middle">${label}</text>`;
+      });
+      svg.innerHTML = g;
+    }
+
+    function upsertNode(node) { nodes.set(node.id, node); drawGraph(); }
+    function upsertEdge(edge) {
+      const key = edge.id || `${edge.type}:${edge.source}:${edge.target}`;
+      if (!edges.find((e) => (e.id || `${e.type}:${e.source}:${e.target}`) === key)) edges.push(edge);
+      drawGraph();
+    }
+
+    function handleEnvelope(env) {
+      const t = env.type;
+      const d = env.data || {};
+      if (t === "graph.node.upserted" && d.node) upsertNode(d.node);
+      if (t === "graph.edge.upserted" && d.edge) upsertEdge(d.edge);
+      if (t === "drift.updated") { renderBands(d.drift); logLine("log-jev", `drift @ ${d.event_id}`); }
+      if (t === "sentinel.finding") {
+        const f = d.finding;
+        logLine("log-sentinel", `${f.rule_id} sev=${f.severity} ${f.detail}`);
+      }
+      if (t === "gate.decided") {
+        const g = d.gate;
+        logLine("log-gate", `${g.decision} incident=${g.incident_level} [${(g.reasons || []).join(", ")}]`);
+      }
+      if (t === "jev.assessed") logLine("log-jev", `jev model=${d.model} latency=${d.latency_ms}ms`);
+      if (t === "dispatch.action" || t === "counter.updated") {
+        const a = d.action || d.counter;
+        logLine("log-dispatch", `${a.kind} ${a.state || ""}`);
+      }
+      if (t === "run.updated" && d.run) {
+        setBadge(d.run.level, d.run.degraded);
+        logLine("log-run", `run L${d.run.level} ${d.run.decision}`);
+      }
+    }
+
+    function connectStream(runId) {
+      if (source) source.close();
+      nodes.clear();
+      edges.length = 0;
+      $("log").innerHTML = "";
+      $("status").textContent = "connecting SSE…";
+      source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
+      ["graph.node.upserted","graph.edge.upserted","drift.updated","sentinel.finding","gate.decided","jev.assessed","dispatch.action","counter.updated","run.updated"].forEach((type) => {
+        source.addEventListener(type, (ev) => {
+          try { handleEnvelope(JSON.parse(ev.data)); } catch (e) { console.warn(e); }
+        });
+      });
+      source.onopen = () => { $("status").textContent = "SSE live"; };
+      source.onerror = () => { $("status").textContent = "SSE error / reconnecting"; };
+    }
+
+    function fillTraces(clusterId) {
+      const c = clusters.find((x) => x.id === clusterId);
+      const sel = $("trace");
+      sel.innerHTML = "";
+      if (!c) return;
+      c.traces.forEach((t) => {
+        const o = document.createElement("option");
+        o.value = t.id;
+        o.textContent = `${t.label} L${t.expected_level} (${t.event_count} ev) — ${t.id}`;
+        sel.appendChild(o);
+      });
+    }
+
+    async function loadCatalog() {
+      const res = await fetch("/api/evals/clusters");
+      const data = await res.json();
+      clusters = data.clusters;
+      const csel = $("cluster");
+      clusters.forEach((c) => {
+        const o = document.createElement("option");
+        o.value = c.id;
+        o.textContent = `${c.id} — ${c.title}`;
+        csel.appendChild(o);
+      });
+      csel.value = data.default_cluster_id;
+      fillTraces(data.default_cluster_id);
+      $("trace").value = data.default_trace_id;
+      csel.onchange = () => fillTraces(csel.value);
+    }
+
+    $("start").onclick = async () => {
+      $("start").disabled = true;
+      try {
+        const body = {
+          cluster_id: $("cluster").value,
+          trace_id: $("trace").value,
+          delay_ms: parseInt($("delay").value, 10) || 0,
+        };
+        const res = await fetch("/api/evals/replay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        const out = await res.json();
+        $("runId").textContent = out.run_id;
+        connectStream(out.run_id);
+        $("status").textContent = `replaying ${out.event_count} events…`;
+      } catch (e) {
+        $("status").textContent = String(e);
+      } finally {
+        $("start").disabled = false;
+      }
+    };
+
+    loadCatalog().catch((e) => { $("status").textContent = String(e); });
+  </script>
+</body>
+</html>

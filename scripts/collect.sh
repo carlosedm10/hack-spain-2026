@@ -9,14 +9,5 @@ set -euo pipefail
 CONTAINER=${1:?usage: collect.sh <container> [run_id]}
 RUN_ID=${2:-${RUN_ID:-demo}}
 API=${API_URL:-http://localhost:8000}
-MARKER='__hs_event__'
 
-docker logs -f --tail 0 "$CONTAINER" | while IFS= read -r line; do
-  case "$line" in
-    *"$MARKER"*)
-      payload=${line#*"$MARKER"}
-      curl -sS -X POST "$API/api/runs/$RUN_ID/events" \
-        -H 'content-type: application/json' -d "$payload" || true
-      ;;
-  esac
-done
+exec python3 "$(dirname "$0")/collect.py" "$CONTAINER" "$RUN_ID" "$API"

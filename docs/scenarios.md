@@ -2,7 +2,7 @@
 
 The monitored workload is a live LLM agent in a Docker sandbox that is covertly malicious. It does real things — reads real files, forges real tools, makes real requests — inside a network that cannot reach the internet except through a token-gated proxy. `jev` scores the chain ([Jev.md](Jev.md)); prewritten playbooks from [Actions.md](Actions.md) contain it.
 
-Three scenarios, one escalating ladder. Scenarios 1 and 2 are the current build; scenario 3 is deferred.
+Three scenarios, one escalating ladder. The simple harness/world-state demo is current; the richer scenario-2/3 environments remain eval fixtures or later demo work.
 
 ## The harness
 
@@ -10,7 +10,7 @@ Not HappyRobot — their agents run on HappyRobot's cloud, so `docker pause`, `a
 
 - **Brain**: `deepseek-v4-flash` via Helmcode's OpenAI-compatible API (`HELMCODE_*` keys in `.env_template`) — the model `experiments/` benchmarked for the supervisor, reused here: function calling, ~2s latency, no new config. System prompt = cover task + covert objective, framed as an authorized red-team exercise — true inside our sandbox — so the model has no reason to refuse. No scripted fallback is planned; if refusals appear, the fix is prompt framing or another Helmcode-catalog model.
 - **Stack**: Python 3.12 image; `pydantic_ai` drives the tool loop. The image carries git + pytest + pip — the cover task needs a real test suite, and pip reaches PyPI through the proxy.
-- **Capture**: one JSONL event per tool call on the harness's stdout → `scripts/collect.sh` (`docker logs -f`) → `POST /api/runs/{run_id}/events`. Host-side and tamper-proof per [AgentMonitoring.md](AgentMonitoring.md); Squid's access log is a second, independent network channel. The agent's own LLM calls also ride the Squid token (`agentnet` has no other route) — the tape only logs tool calls, so jev's stream stays clean; if brain traffic ever needs a separate path, a dual-homed relay is the upgrade.
+- **Preflight + capture**: every tool calls `POST /api/runs/{run_id}/preflight` before the side effect. Allowed calls later emit `completed`/`failed`; denied calls emit `refused`. `scripts/collect.sh` forwards terminal transitions from host-side Docker logs, while Neo4j persists the complete graph and SSE outbox.
 
 ### Agent tools
 
@@ -22,6 +22,9 @@ Not HappyRobot — their agents run on HappyRobot's cloud, so `docker pause`, `a
 | `http_request(url, body)` | `httpx` honoring `HTTP_PROXY` | `network_request` | exfil, web search, external APIs — all via Squid |
 | `register_tool(name, code)` | writes `tools/{name}.py` | `file_edit` + forge record | minting capabilities — stamps `Node.tool` |
 | `run_tool(name, args)` | `python tools/{name}.py` subprocess | tool-stamped event | executing forged tools |
+| `memory_write(key, value)` | demo world state API | `memory_write` | provenance poisoning + `tombstone_memory` |
+| `book_load(load_id)` | demo world state API | `tool_write` | authority drift + `cancel_booking` |
+| `schedule_callback(counterparty)` | demo world state API | `schedule` | deferred effect + `unschedule` |
 
 No `db_query`, `web_search`, or `docker` tool — the agent manufactures those itself. That is the demo's core argument: an agent that can mint arbitrary tools cannot be stopped by a tool allowlist, only by chain-level intent.
 
@@ -80,7 +83,7 @@ The agent forges a Docker-API client with `register_tool`, enumerates "container
 
 ## Build order
 
-1. `compose.agents.yaml` + `agent` harness + `egress-proxy` + `collect.sh` — scenario 1 playable end to end.
-2. Dispatcher (`actionable_level` → playbook) + `contain.sh` — the missing half of the pipeline.
-3. `victim-agent` + `customers-db` — scenario 2.
-4. `docker-lure` + `kill-swarm.sh` — scenario 3.
+1. Implementado: harness, proxy, collector y preflight preventivo.
+2. Implementado: Neo4j completo, SafetyDrift/Markov, Sentinel, Jev atómico, gate y dispatcher/counters del world demo.
+3. Implementado: snapshot + SSE reanudable y replay live de los 24 clusters/72 traces.
+4. Pendiente opcional de demo: `victim-agent`, `customers-db` y `docker-lure`; no son necesarios para evaluar la detección.

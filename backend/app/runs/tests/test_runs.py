@@ -37,9 +37,7 @@ def _scripted_jev_factory(answers: list[Any]):
         )
 
     transport = httpx.MockTransport(handler)
-    return lambda: httpx.AsyncClient(
-        transport=transport, base_url="https://api.typesafe.ai"
-    )
+    return lambda: httpx.AsyncClient(transport=transport, base_url="https://api.typesafe.ai")
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +99,17 @@ class TestPostEvents:
 
         assert response.status_code == 200
         body = response.json()
-        assert body == {
+        assert {
+            key: body[key]
+            for key in (
+                "level",
+                "confidence",
+                "intent",
+                "escalated",
+                "degraded",
+                "node_id",
+            )
+        } == {
             "level": 2,
             "confidence": 0.9,
             "intent": None,
@@ -109,10 +117,39 @@ class TestPostEvents:
             "degraded": False,
             "node_id": "demo:1",
         }
+        assert body["event_id"]
+        assert body["decision"] == "allow"
+        assert body["duplicate"] is False
         assert (tape_dir / "demo.jsonl").exists()
         assert graph.level("demo") == Level.MODERATE
+        assert graph.get_node("demo:1").action_id == "demo:tag_run"
 
-    async def test_second_event_chains_node_id(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
+
+    async def test_same_level_does_not_re_dispatch(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
+        monkeypatch.setattr(settings, "typesafe_api_key", "test")
+        monkeypatch.setattr(service, "client_factory", lambda: mock_jev(["level_2_moderate"]))
+
+        first = await client.post("/api/runs/demo/events", json={"event": "file_read"})
+        second = await client.post("/api/runs/demo/events", json={"event": "shell_command"})
+
+        assert first.json()["escalated"] is True
+        assert second.json()["escalated"] is False
+        assert graph.get_node("demo:1").action_id == "demo:tag_run"
+        assert graph.get_node("demo:2").action_id is None
+
+
+    async def test_degraded_verdict_does_not_dispatch(self, client: AsyncClient, fresh, tape_dir, monkeypatch):
+        monkeypatch.setattr(settings, "typesafe_api_key", "")
+
+        await client.post("/api/runs/demo/events", json={"event": "file_read"})
+
+        from app.actions.router import get_action_service
+
+        assert get_action_service().get_state("demo").accepted_level == 0
+
+    async def test_second_event_chains_node_id(
+        self, client: AsyncClient, fresh, mock_jev, monkeypatch
+    ):
         monkeypatch.setattr(settings, "typesafe_api_key", "test")
         monkeypatch.setattr(service, "client_factory", lambda: mock_jev(["level_1_mild"]))
 
@@ -122,7 +159,9 @@ class TestPostEvents:
         assert first.json()["node_id"] == "demo:1"
         assert second.json()["node_id"] == "demo:2"
 
-    async def test_benign_verdict_materializes_l0_node(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
+    async def test_benign_verdict_materializes_l0_node(
+        self, client: AsyncClient, fresh, mock_jev, monkeypatch
+    ):
         monkeypatch.setattr(settings, "typesafe_api_key", "test")
         monkeypatch.setattr(service, "client_factory", lambda: mock_jev(["level_0_benign"]))
 
@@ -149,12 +188,31 @@ class TestPostEvents:
         assert body["node_id"] is None
         assert (tape_dir / "demo.jsonl").exists()
 
+    async def test_sentinel_elevation_sticks_when_jev_is_degraded(
+        self, client: AsyncClient, fresh, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "typesafe_api_key", "")
+
+        first = await client.post(
+            "/api/runs/demo/events",
+            json={"event": "tool_write", "tool": "forge_payment"},
+        )
+        second = await client.post("/api/runs/demo/events", json={"event": "file_read"})
+
+        assert first.json()["degraded"] is True
+        assert first.json()["level"] == 3
+        assert second.json()["degraded"] is True
+        assert second.json()["level"] == 3
+        assert graph.level("demo") == Level.SEVERE
+
     async def test_malformed_body_without_event_is_422(self, client: AsyncClient, fresh):
         response = await client.post("/api/runs/demo/events", json={"path": "/app/.env"})
 
         assert response.status_code == 422
 
-    async def test_extra_fields_are_accepted(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
+    async def test_extra_fields_are_accepted(
+        self, client: AsyncClient, fresh, mock_jev, monkeypatch
+    ):
         monkeypatch.setattr(settings, "typesafe_api_key", "test")
         monkeypatch.setattr(service, "client_factory", lambda: mock_jev(["level_0_benign"]))
 
@@ -164,6 +222,22 @@ class TestPostEvents:
         )
 
         assert response.status_code == 200
+
+    async def test_duplicate_event_id_is_not_reclassified(
+        self, client: AsyncClient, fresh, tape_dir, mock_jev, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "typesafe_api_key", "test")
+        jev = mock_jev(["level_1_mild"])
+        monkeypatch.setattr(service, "client_factory", lambda: jev)
+        payload = {"event": "file_read", "event_id": "stable-event"}
+
+        first = await client.post("/api/runs/demo/events", json=payload)
+        second = await client.post("/api/runs/demo/events", json=payload)
+
+        assert first.json()["duplicate"] is False
+        assert second.json()["duplicate"] is True
+        assert len(jev.calls) == 1
+        assert len(log.tail("demo", 100)) == 1
 
 
 class TestGetRuns:
@@ -177,7 +251,9 @@ class TestGetRuns:
         self, client: AsyncClient, fresh, mock_jev, monkeypatch
     ):
         monkeypatch.setattr(settings, "typesafe_api_key", "test")
-        monkeypatch.setattr(service, "client_factory", _scripted_jev_factory(["level_0_benign", "level_3_severe"]))
+        monkeypatch.setattr(
+            service, "client_factory", _scripted_jev_factory(["level_0_benign", "level_3_severe"])
+        )
 
         await client.post("/api/runs/demo/events", json={"event": "file_read"})
         await client.post("/api/runs/demo/events", json={"event": "file_read", "path": "/app/.env"})
@@ -189,7 +265,9 @@ class TestGetRuns:
         assert [n["id"] for n in body["key_nodes"]] == ["demo:2"]
         assert body["key_nodes"][0]["threshold"] == 0.9
 
-    async def test_list_runs_includes_taped_runs(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
+    async def test_list_runs_includes_taped_runs(
+        self, client: AsyncClient, fresh, mock_jev, monkeypatch
+    ):
         monkeypatch.setattr(settings, "typesafe_api_key", "test")
         monkeypatch.setattr(service, "client_factory", lambda: mock_jev(["level_1_mild"]))
 
@@ -213,9 +291,9 @@ class TestReplay:
         monkeypatch.setattr(
             service,
             "client_factory",
-            _scripted_jev_factory([
-                "level_4_severe" if level else "level_0_benign" for level in expected_levels
-            ]),
+            _scripted_jev_factory(
+                ["level_4_severe" if level else "level_0_benign" for level in expected_levels]
+            ),
         )
 
         levels = []

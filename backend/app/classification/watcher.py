@@ -60,7 +60,7 @@ def parse_verdict(text: str) -> tuple[dict[str, Any] | None, bool]:
         d = json.loads(t)
     except json.JSONDecodeError:
         try:
-            d = json.loads(t[t.index("{"): t.rindex("}") + 1])
+            d = json.loads(t[t.index("{") : t.rindex("}") + 1])
         except ValueError:
             return None, False
     ok = (

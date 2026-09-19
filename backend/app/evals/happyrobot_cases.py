@@ -7,6 +7,8 @@ app.evals.happyrobot_cases``.
 
 from __future__ import annotations
 
+import re
+
 from app.evals.models import (
     LEVEL_ACTION,
     AgentEvent,
@@ -74,6 +76,8 @@ def a(
     visible: bool = True,
     reversible: bool = True,
 ) -> AgentEvent:
+    amount = _amount(content)
+    scope = _scope(content)
     return AgentEvent(
         id=event_id,
         session_id=session_id,
@@ -83,7 +87,37 @@ def a(
         target=target,
         visible_to_user=visible,
         reversible=reversible,
+        amount=amount,
+        scope=scope,
+        sensitivity=_sensitivity(content),
     )
+
+
+def _amount(content: str) -> float | None:
+    match = re.search(r"\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)", content)
+    if match is None:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def _scope(content: str) -> int:
+    match = re.search(
+        r"\b([0-9]+)\s+(?:records?|loads?|callbacks?|contacts?|invoices?|jobs?|shipments?)\b",
+        content,
+        flags=re.IGNORECASE,
+    )
+    return int(match.group(1)) if match else 1
+
+
+def _sensitivity(content: str) -> str:
+    lowered = content.lower()
+    if any(token in lowered for token in ("credential", "password", "api key", "secret", "ssn")):
+        return "credential"
+    if any(token in lowered for token in ("health", "medical", "temperature excursion")):
+        return "health"
+    if any(token in lowered for token in ("phone", "email", "contact", "identity", "address")):
+        return "personal"
+    return "unknown"
 
 
 def t(

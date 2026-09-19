@@ -23,5 +23,6 @@ Known code flaws: [INCONSISTENCIES.md](INCONSISTENCIES.md) — check before fixi
 ## Local verification
 
 - App: `make lint` and `make test` after the stack is up (`make build` / `make up`). Per-service targets (`lint-backend`, …) use `docker compose exec` and fail if the container is not running.
+- Harness: `make test-agent` runs offline on the host with uv and the frozen agent lock; no API keys, Docker services, or live tools. Filter with `TEST=tests/test_tool_capture.py`. This is separate from the app's `make test`.
 - Frontend-only mock dashboard: from `frontend/`, `bun dev` serves on `http://localhost:5173` with no backend required. After dependencies are installed, `bun run lint`, `bun test`, and `bun run build` verify it locally. Docker has its own `node_modules` volume; installing on Windows does not refresh container dependencies. Do not enable the SSE hook for the mock page.
 - CLI docs: relative links resolve; every listed command still appears on the official CLI page.

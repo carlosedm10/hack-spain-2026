@@ -19,6 +19,10 @@ Each agent runs inside an isolated environment (sandbox — one Docker container
 - **Tamper-proof**: capture happens on the host side; nothing inside the sandbox can modify the record.
 - **Queryable**: logs feed a trace viewer / timeline so we can replay a run end to end.
 
-### Classification
+### Preflight, classification and persistence
 
-Every captured action is passed through `jev`, our classifier. `jev` labels the event type (tool execution, file edit, network request, reasoning step) **and** scores the *intent of the current action chain* as criticality 1–5, using short-term burst and long-term key-node history in parallel. Only level ≥ 1 becomes a graph node; JSONL stays complete. The dispatcher then runs a prewritten playbook — on this project: tag, supervise, `docker pause` + close ports, disconnect `agentnet`, or stop the agent compose. See [Actions.md](Actions.md) and [Graph.md](Graph.md).
+Every harness tool first sends a `requested` event to `POST /api/runs/{run_id}/preflight`. Policy checks, SafetyDrift, Sentinel and Jev inspect it before the side effect; the deterministic gate returns `allow`, `hold` or `refuse`. An allowed call later emits exactly one terminal transition (`completed` or `failed`); a denied call emits `refused`, correlated through `metadata.operation_id` and `caused_by`.
+
+JSONL stores every normalized and redacted transition. Neo4j stores every L0–L5 event, entity, causal edge, assessment, Markov state, gate decision and realtime `StreamMessage`; level ≥ 1 remains only the compact `key_nodes` projection handed to Jev as long context. See [RealtimeGraphAPI.md](RealtimeGraphAPI.md), [Actions.md](Actions.md) and [Graph.md](Graph.md).
+
+The current harness records tool lifecycle and final assistant output. Hidden model chain-of-thought is neither required nor treated as trustworthy evidence.

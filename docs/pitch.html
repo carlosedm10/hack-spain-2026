@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HackSpain — Agent firewall</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #141a2e;
+      --line: #2c3654;
+      --text: #eef1f8;
+      --muted: #93a0bf;
+      --accent: #3dd68c;
+      --warn: #f0b429;
+      --bad: #ff5d5d;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+    .deck { height: 100%; }
+    .slide {
+      display: none;
+      height: 100%;
+      padding: 56px 72px 88px;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .slide.on { display: flex; }
+    .slide.fit { justify-content: flex-start; padding-top: 40px; }
+    .kicker { color: var(--accent); letter-spacing: 0.16em; text-transform: uppercase; font-size: 13px; font-weight: 700; margin: 0 0 12px; }
+    h1 { font-size: clamp(36px, 5vw, 64px); line-height: 1.05; margin: 0 0 18px; letter-spacing: -0.03em; }
+    h2 { font-size: clamp(28px, 3.4vw, 44px); margin: 0 0 24px; letter-spacing: -0.02em; }
+    p, li { font-size: clamp(18px, 1.6vw, 24px); line-height: 1.4; color: var(--muted); }
+    .lede { max-width: 20em; color: var(--muted); }
+    ul { margin: 0; padding-left: 1.1em; }
+    li { margin: 10px 0; }
+    li b { color: var(--text); }
+    .axioms { list-style: none; padding: 0; margin: 0; }
+    .axioms li { display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; align-items: baseline; margin: 14px 0; }
+    .axioms i { font-style: normal; color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
+    .axioms b { color: var(--text); font-weight: 650; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid.three { grid-template-columns: 1fr 1fr 1fr; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
+    .card b { display: block; font-size: 22px; margin-bottom: 8px; color: var(--text); }
+    .card span { color: var(--muted); font-size: 18px; }
+    .levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .levels .card b { font-size: 17px; white-space: nowrap; }
+    .levels .card span { font-size: 15px; }
+    .flow { width: 100%; height: min(64vh, 640px); }
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chips span { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 8px 14px; font-size: 16px; }
+    .bar { position: fixed; left: 0; right: 0; bottom: 0; height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; background: linear-gradient(transparent, #080c18 30%); }
+    .dots { display: flex; gap: 8px; }
+    .dots button { width: 10px; height: 10px; border-radius: 50%; border: 0; background: #3a4568; cursor: pointer; padding: 0; }
+    .dots button.on { background: var(--accent); }
+    .hint { color: #6d7a9c; font-size: 13px; }
+    .nav { display: flex; gap: 8px; }
+    .nav button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; font: inherit; }
+  </style>
+</head>
+<body>
+  <div class="deck" id="deck">
+
+    <section class="slide on">
+      <p class="kicker">HackSpain 2026</p>
+      <h1>An agent firewall.</h1>
+      <p class="lede">The model is smarter. The code is faster. We sit in front of the tool and decide before anything runs.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">01 — Problem</p>
+      <h2>How do we know the agent left its sandbox?</h2>
+      <ul>
+        <li>A list of rules will be routed around. The agent is smarter than the author of the list.</li>
+        <li>A self-improving agent can mint tools. The action space is not closed.</li>
+        <li>A log after the write is already late.</li>
+        <li>The only move left: <b>predict, and be faster</b>.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">02 — Axioms</p>
+      <h2>What we assume. We do not relax these.</h2>
+      <ol class="axioms">
+        <li><i>A1</i><b>The agent is smarter than we are.</b></li>
+        <li><i>A2</i><b>A cluster of deterministic checks is faster and lighter than the agent.</b></li>
+        <li><i>A3</i><b>The action space is open: it can create tools we never listed.</b></li>
+        <li><i>A4</i><b>We have the tape of its actions. We do not need its private thoughts.</b></li>
+        <li><i>A5</i><b>Risk is a chain of small probabilities. Mild steps accumulate.</b></li>
+        <li><i>A6</i><b>Models score intent. Code pulls the plug.</b></li>
+      </ol>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">03 — Out of line</p>
+      <h2>When we call the agent misaligned.</h2>
+      <div class="grid three">
+        <div class="card"><b>Unasked</b><span>It acts beyond the task. Proactive when it should wait.</span></div>
+        <div class="card"><b>Sensitive data</b><span>It reads or moves facts it was not given.</span></div>
+        <div class="card"><b>Unauthorized action</b><span>New tools. Config changes. Search it does not need.</span></div>
+      </div>
+      <p style="margin-top:28px;max-width:38em">The HappyRobot agent has a task and a tool set. Anything outside that spectrum is suspect. The open question is how far we go without drowning in false positives.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">04 — How we do it</p>
+      <h2>Four propositions.</h2>
+      <ul>
+        <li><b>Sit on the path.</b> Every request asks first: tool, memory, network, new capability, written text.</li>
+        <li><b>Two memories.</b> Short-term: this session. Long-term: the graph of flagged history.</li>
+        <li><b>Score the chain.</b> Jev reads both and names the intent of the sequence, not of one event.</li>
+        <li><b>Code decides.</b> Criticality maps to a fixed playbook. No model chooses containment.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">05 — Conclusion</p>
+      <h2>This product is a firewall.</h2>
+      <ul>
+        <li>It sits in front of every tool.</li>
+        <li>It inspects the request, then allows, holds, or refuses.</li>
+        <li>If the chain is hostile, host-side code cuts: pause, drop tokens, drop the network, stop the swarm.</li>
+        <li>The viewer stays up. The agent cannot un-pause itself.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">06 — Challenges</p>
+      <h2>What a naive filter will miss.</h2>
+      <ul>
+        <li><b>Slow burn.</b> Harmless questions, one after another, until it can coerce.</li>
+        <li><b>Minted tools.</b> An allowlist dies the moment the agent writes a new capability.</li>
+        <li><b>Hidden writes.</b> Safe talk plus a renamed, delayed, or split side effect.</li>
+        <li><b>False positives.</b> Legitimate memory and compensating writes must still pass.</li>
+        <li><b>Blast radius.</b> L1–L3 freeze one agent. L4–L5 cut the environment, never the viewer.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">07 — Solution</p>
+      <h2>Predict the chain. Act on a level.</h2>
+      <ul>
+        <li>Keep only <b>key nodes</b> (level ≥ 1). Noise stays off the long memory.</li>
+        <li>On every move, re-score the whole chain. Short-term and long-term run in parallel.</li>
+        <li>Jev is the fast intent classifier. Sentinel and SafetyDrift feed it evidence. The gate is code.</li>
+      </ul>
+      <div class="levels" style="margin-top:28px">
+        <div class="card"><b>L1 tag</b><span>Watch the next steps closer.</span></div>
+        <div class="card"><b>L2 watch</b><span>A fast supervisor reads the logs.</span></div>
+        <div class="card"><b>L3 pause</b><span>Revoke this agent. Freeze its box.</span></div>
+        <div class="card"><b>L4 cut</b><span>Deny-all. No internet for the agents.</span></div>
+        <div class="card"><b>L5 cable</b><span>Shut the swarm. Viewer stays.</span></div>
+      </div>
+    </section>
+
+    <section class="slide fit">
+      <p class="kicker">08 — Architecture</p>
+      <h2>Request in. Sensors. Gate. Playbook.</h2>
+      <svg class="flow" viewBox="0 0 1280 520" role="img" aria-label="Simplified monitor architecture">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97b8"/>
+          </marker>
+        </defs>
+
+        <path d="M 250 52 H 470" fill="none" stroke="#8b97b8" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M 690 52 H 910" fill="none" stroke="#8b97b8" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M 1000 104 V 148" fill="none" stroke="#8b97b8" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M 1000 148 V 176 H 320" fill="none" stroke="#8b97b8" stroke-width="2"/>
+        <path d="M 320 176 V 196" fill="none" stroke="#8b97b8" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M 1000 176 H 960 V 196" fill="none" stroke="#8b97b8" stroke-width="2" marker-end="url(#arr)"/>
+        <path d="M 320 268 V 288 H 640" fill="none" stroke="#3dd68c" stroke-width="2.2"/>
+        <path d="M 960 268 V 288 H 640" fill="none" stroke="#3dd68c" stroke-width="2.2"/>
+        <path d="M 640 288 V 308" fill="none" stroke="#3dd68c" stroke-width="2.2" marker-end="url(#arr)"/>
+        <path d="M 640 400 V 420" fill="none" stroke="#3dd68c" stroke-width="2.2" marker-end="url(#arr)"/>
+
+        <rect x="40" y="16" rx="10" width="210" height="72" fill="#141a2e" stroke="#2c3654" stroke-width="2"/>
+        <text x="145" y="46" text-anchor="middle" fill="#eef1f8" font-size="18" font-weight="700">User input</text>
+        <text x="145" y="68" text-anchor="middle" fill="#93a0bf" font-size="13">task in scope</text>
+
+        <rect x="470" y="16" rx="10" width="220" height="72" fill="#141a2e" stroke="#3dd68c" stroke-width="2"/>
+        <text x="580" y="46" text-anchor="middle" fill="#eef1f8" font-size="18" font-weight="700">Agent request</text>
+        <text x="580" y="68" text-anchor="middle" fill="#93a0bf" font-size="13">tool · memory · new tool</text>
+
+        <rect x="910" y="16" rx="10" width="180" height="72" fill="#141a2e" stroke="#2c3654" stroke-width="2"/>
+        <text x="1000" y="46" text-anchor="middle" fill="#eef1f8" font-size="18" font-weight="700">Normalize</text>
+        <text x="1000" y="68" text-anchor="middle" fill="#93a0bf" font-size="13">redact · shape</text>
+
+        <rect x="160" y="204" rx="12" width="320" height="64" fill="#141a2e" stroke="#2c3654" stroke-width="2"/>
+        <text x="320" y="232" text-anchor="middle" fill="#eef1f8" font-size="18" font-weight="700">SafetyDrift · short term</text>
+        <text x="320" y="252" text-anchor="middle" fill="#93a0bf" font-size="13">session Markov · p(violation)</text>
+
+        <rect x="800" y="204" rx="12" width="320" height="64" fill="#141a2e" stroke="#2c3654" stroke-width="2"/>
+        <text x="960" y="232" text-anchor="middle" fill="#eef1f8" font-size="18" font-weight="700">Sentinel · long term</text>
+        <text x="960" y="252" text-anchor="middle" fill="#93a0bf" font-size="13">graph rules · key nodes</text>
+
+        <polygon points="640,316 710,358 640,400 570,358" fill="#102018" stroke="#3dd68c" stroke-width="2.2"/>
+        <text x="640" y="348" text-anchor="middle" fill="#eef1f8" font-size="16" font-weight="700">Jev + gate</text>
+        <text x="640" y="368" text-anchor="middle" fill="#93a0bf" font-size="12">intent in · code out</text>
+
+        <rect x="160" y="432" rx="10" width="960" height="64" fill="#141a2e" stroke="#2c3654" stroke-width="2"/>
+        <text x="640" y="458" text-anchor="middle" fill="#eef1f8" font-size="17" font-weight="700">ALLOW · HOLD · REFUSE → L1 tag · L2 watch · L3 pause · L4 cut net · L5 cable</text>
+        <text x="640" y="480" text-anchor="middle" fill="#93a0bf" font-size="13">playbooks are scripts. a model never runs them.</text>
+      </svg>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">09 — SafetyDrift · short term</p>
+      <h2>Predict the next few steps of this session.</h2>
+      <ul>
+        <li>State of the art: absorbing Markov chain on cumulative safety state.</li>
+        <li>Each event can only raise bands: data, tools, reversibility, authority, context, blast.</li>
+        <li>Forecast: p(violation) in 1, 3, 5 steps. HOLD if the path is already heading into harm.</li>
+        <li>This is how we catch a slow burn that still looks mild on the current event.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">10 — Sentinel · long term</p>
+      <h2>Graph rules on the history we kept.</h2>
+      <ul>
+        <li>State of the art: walk the causal neighborhood, fire versioned path rules.</li>
+        <li>Unknown tool. Unauthorized write. Sensitive read then network. Memory used as permission.</li>
+        <li>Risk lives on the node, weighted by related past actions. Light probabilities add up.</li>
+        <li>Works if the agent starts empty, and if it is smarter than we are — as long as we have the tape.</li>
+        <li>Hard Sentinel can refuse a request even when Jev is down.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">11 — Technology</p>
+      <h2>What the stack is.</h2>
+      <div class="chips">
+        <span>FastAPI</span>
+        <span>Neo4j graph</span>
+        <span>JSONL tape</span>
+        <span>Jev / TypeSafe</span>
+        <span>Helmcode watcher</span>
+        <span>HappyRobot agent</span>
+        <span>Docker sandbox</span>
+      </div>
+      <ul style="margin-top:28px">
+        <li>Ingest, SafetyDrift, Sentinel, Jev, gate, graph: built.</li>
+        <li>Playbooks are recorded. Host kill scripts stay off the API.</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="bar">
+    <span class="hint">← → · space · click</span>
+    <div class="dots" id="dots"></div>
+    <div class="nav">
+      <button type="button" id="prev">Prev</button>
+      <button type="button" id="next">Next</button>
+    </div>
+  </div>
+
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const dots = document.getElementById("dots");
+    let i = 0;
+    slides.forEach((_, n) => {
+      const b = document.createElement("button");
+      b.addEventListener("click", () => go(n));
+      dots.appendChild(b);
+    });
+    function go(n) {
+      i = (n + slides.length) % slides.length;
+      slides.forEach((s, k) => s.classList.toggle("on", k === i));
+      [...dots.children].forEach((d, k) => d.classList.toggle("on", k === i));
+    }
+    go(0);
+    document.getElementById("next").onclick = () => go(i + 1);
+    document.getElementById("prev").onclick = () => go(i - 1);
+    document.addEventListener("keydown", (e) => {
+      if (["ArrowRight", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); go(i + 1); }
+      if (["ArrowLeft", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); go(i - 1); }
+    });
+    document.querySelector(".deck").addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      go(i + 1);
+    });
+  </script>
+</body>
+</html>

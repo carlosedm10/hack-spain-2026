@@ -14,6 +14,7 @@ from typing import Any
 from app.classification.models import Level
 from app.config import settings
 from app.graph.models import Node
+from app.graph.neo4j import ClassificationStep
 
 _UPDATABLE_FIELDS = frozenset({"level", "threshold", "intent", "event", "action_id"})
 
@@ -191,7 +192,11 @@ class ActionGraph:
         action_id: str | None = None,
     ) -> Node:
         with self._lock, self._batch():
+            # Composite op: ensure_run may create the root and the run node
+            # before the new key node — all of it lands in one GraphUpdate.
             run_node = self.ensure_run(run_id)
+            # Run membership is the run_id stamp, not graph traversal: an undirected
+            # graph cannot keep runs isolated by direction alone.
             chained = [n for n in self._nodes.values() if n.run_id == run_id and n is not run_node]
             last = chained[-1] if chained else run_node
             seq = len(chained) + 1
@@ -228,6 +233,34 @@ class ActionGraph:
             (n.level for n in self.run_nodes(run_id) if n.threshold >= settings.action_gate),
             default=Level.NONE,
         )
+
+    def hydrate_run(self, run_id: str, steps: list[ClassificationStep]) -> None:
+        """Rebuild the in-memory chain from Neo4j when this run is not cached yet."""
+        with self._lock:
+            chained = [
+                node
+                for node in self._nodes.values()
+                if node.run_id == run_id and node.id != f"run:{run_id}"
+            ]
+            if chained or not steps:
+                return
+            with self._batch():
+                run_node = self.ensure_run(run_id)
+                last = run_node
+                for index, step in enumerate(steps, start=1):
+                    node_id = f"{run_id}:{index}"
+                    node = self.add_node(
+                        node_id,
+                        connect=last,
+                        threshold=step.threshold,
+                        run_id=run_id,
+                        level=step.level,
+                        intent=step.intent,
+                        event=step.event,
+                        action_id=None,
+                        created_at=datetime.now(UTC),
+                    )
+                    last = node
 
     def update(self, node_id: str, **fields: Any) -> Node:
         unknown = set(fields) - _UPDATABLE_FIELDS

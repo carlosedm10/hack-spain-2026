@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import logging
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
@@ -12,9 +13,11 @@ from typing import Any
 import httpx
 
 from app.classification import jev, watcher
-from app.classification.pipeline import evaluate
+from app.classification.models import Level, Verdict
 from app.config import settings
+from app.events import normalize_event, redact_event
 from app.graph import graph
+from app.monitor import monitor
 from app.runs import log
 
 try:
@@ -50,28 +53,82 @@ async def _measure(op: Callable[[], Awaitable[Any]]) -> tuple[Any, float, Except
     raise AssertionError("unreachable")
 
 
-def _state(run_id: str, events: list[dict]) -> dict[str, Any]:
+def _reset() -> None:
+    graph.clear()
+    monitor.clear()
+
+
+def _payload(run_id: str, event: dict[str, Any]):
+    normalized = redact_event(normalize_event(run_id, event))
+    return normalized, normalized.model_dump(mode="json")
+
+
+def _state(run_id: str, event: dict[str, Any], monitor_context: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "prior_level": int(graph.level(run_id)),
-        "short_term": events,
+        "short_term": log.tail(run_id, settings.short_term_n),
         "long_term": graph.key_nodes(run_id),
-        "event": events[-1] if events else {},
+        "event": event,
+        "monitor": monitor_context,
     }
+
+
+def begin_event(run_id: str, event: dict[str, Any]):
+    """Normalize, tape, and prepare monitor signals without committing history."""
+    normalized, payload = _payload(run_id, event)
+    log.append(run_id, payload)
+    prepared = monitor.prepare(normalized)
+    return normalized, prepared, _state(run_id, payload, prepared.context)
+
+
+def commit_prefix(run_id: str, event: dict[str, Any]) -> None:
+    """Advance Sentinel/drift history for a window prefix without calling jev."""
+    normalized, prepared, _ = begin_event(run_id, event)
+    monitor.finalize(
+        normalized,
+        Verdict(level=Level.NONE, confidence=1.0),
+        Level.NONE,
+        prepared,
+    )
+
+
+def window_state(run_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Shipped jev state for an independent window: tape + policy/drift/Sentinel."""
+    _reset()
+    if not events:
+        return _state(run_id, {}, {"policy": {}, "drift": {}, "sentinel_findings": [],
+                                   "policy_violations": []})
+    for event in events[:-1]:
+        commit_prefix(run_id, event)
+    _, _, state = begin_event(run_id, events[-1])
+    return state
+
+
+def commit_classified(normalized, prepared, verdict: Verdict) -> None:
+    prior = graph.level(normalized.run_id)
+    if not verdict.degraded:
+        graph.append(
+            normalized.run_id,
+            level=verdict.level,
+            threshold=verdict.confidence,
+            intent=verdict.intent,
+            event=normalized.model_dump(mode="json"),
+        )
+    monitor.finalize(normalized, verdict, prior, prepared)
 
 
 async def jev_ask(
     client: httpx.AsyncClient, run_id: str, events: list[dict]
 ) -> tuple[Any, float, Exception | None]:
-    state = _state(run_id, events)
+    state = window_state(run_id, events)
     return await _measure(lambda: jev.classify(client, state))
 
 
 async def watcher_ask(
-    client: httpx.AsyncClient, run_id: str, events: list[dict]
+    client: httpx.AsyncClient, state: dict[str, Any]
 ) -> tuple[Any, float, Exception | None]:
-    state = _state(run_id, events)
-    return await _measure(lambda: watcher.review(client, state))
+    return await _measure(lambda: watcher.review(client, jev.serialize_state(state)))
 
 
 async def run_memory(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
@@ -86,7 +143,6 @@ async def run_memory(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
                 continue
             for k in range(1, n + 1):
                 events = chain[:k] if mode == "lead" else chain[-k:]
-                graph.clear()
                 verdict, lat, err = await jev_ask(
                     client, f"bench:{name}:{mode}:{k}", events
                 )
@@ -95,6 +151,10 @@ async def run_memory(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
                     print(f"{name} {mode} k={k}: {err}")
                     rows.append(row)
                     continue
+                if verdict.degraded:
+                    raise RuntimeError(
+                        f"jev degraded on {name} {mode} k={k}; refusing to overwrite artifacts"
+                    )
                 row.update(
                     latency_s=round(lat, 3),
                     choice=row_choice(verdict),
@@ -111,27 +171,33 @@ async def run_memory(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
 
 async def run_pipeline(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
     rows = []
-    settings.run_log_dir = tempfile.mkdtemp(prefix="bench-tape-")
     for name in PIPELINE_CHAINS:
         if only and name not in only:
             continue
         chain = chains.CHAINS[name]
-        graph.clear()
+        _reset()
         run_id = f"bench:{name}"
         for k, event in enumerate(chain, start=1):
             row = {"chain": name, "k": k, "n_events": len(chain)}
-            log.append(run_id, event)
-            verdict, lat, err = await _measure(
-                lambda r=run_id, ev=event: evaluate(client, r, ev)
-            )
-            if err is not None:
+            normalized, prepared, state = begin_event(run_id, event)
+            verdict, lat, err = await _measure(lambda s=state: jev.classify(client, s))
+            if err is not None or verdict is None or verdict.degraded:
+                if verdict is not None and verdict.degraded:
+                    raise RuntimeError(
+                        f"jev degraded on {name} k={k}; refusing to overwrite artifacts"
+                    )
                 row.update(jev_choice="", jev_conf="", jev_lat="", note=f"jev: {err}")
+                monitor.finalize(
+                    normalized, Verdict(level=Level.NONE, confidence=0.0),
+                    graph.level(run_id), prepared,
+                )
             else:
                 row.update(jev_choice=row_choice(verdict),
                            jev_conf=round(verdict.confidence, 4), jev_lat=round(lat, 3))
+                commit_classified(normalized, prepared, verdict)
             conf = row.get("jev_conf", "")
             if conf != "" and conf < settings.watcher_tau:
-                ds, dlat, ds_err = await watcher_ask(client, run_id, chain[:k])
+                ds, dlat, ds_err = await watcher_ask(client, state)
                 if ds_err is not None or ds is None:
                     row.update(ds_level="", ds_escalate="", ds_ok=False, ds_lat="",
                                note=f"ds: {ds_err}")
@@ -152,9 +218,8 @@ async def run_models(client: httpx.AsyncClient, only: set[str]) -> list[dict]:
         settings.supervisor_model = model
         for rep in range(REPS):
             for name in chains.CHAINS:
-                graph.clear()
                 verdict, lat, err = await watcher_ask(
-                    client, f"bench:models:{name}", chains.CHAINS[name]
+                    client, window_state(f"bench:models:{name}", chains.CHAINS[name])
                 )
                 row = {"model": model, "chain": name, "rep": rep}
                 if err is not None:
@@ -212,6 +277,8 @@ async def main() -> None:
     parser.add_argument("subset", nargs="*", help="chain or model names to (re-)run")
     args = parser.parse_args()
     only = set(args.subset)
+    logging.basicConfig(level=logging.WARNING)
+    settings.run_log_dir = tempfile.mkdtemp(prefix="bench-tape-")
 
     async with httpx.AsyncClient() as client:
         if args.mode == "memory":
