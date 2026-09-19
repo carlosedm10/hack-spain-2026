@@ -34,9 +34,9 @@ export type GraphPanelProps = {
 };
 
 const STATUS_PILL: Record<GraphStreamStatus, { dot: string; text: string }> = {
-  live: { dot: "bg-emerald-500 animate-pulse", text: "LIVE" },
-  connecting: { dot: "bg-sky-500", text: "CONNECTING" },
-  reconnecting: { dot: "bg-amber-500", text: "RECONNECTING" },
+  live: { dot: "bg-[#027a48] animate-pulse", text: "LIVE" },
+  connecting: { dot: "bg-[#1447e6]", text: "CONNECTING" },
+  reconnecting: { dot: "bg-[#b06a38]", text: "RECONNECTING" },
 };
 
 export function GraphPanel({
@@ -96,7 +96,7 @@ export function GraphPanel({
           shape: "circle",
         },
         style: {
-          stroke: link.pending ? "#9dbaf0" : "#d4dae3",
+          stroke: link.pending ? "#a8bbef" : "#dad5cc",
           strokeWidth: 1.5,
           strokeDasharray: link.pending ? "4 4" : undefined,
         },
@@ -140,7 +140,7 @@ export function GraphPanel({
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
-        background: "#fff",
+        background: "#fcfcfc",
       }}
     >
       <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b px-4">
@@ -189,7 +189,7 @@ export function GraphPanel({
           deleteKeyCode={null}
           minZoom={0.25}
           maxZoom={1.8}
-          style={{ background: "#fff", color: "#4e81d1" }}
+          style={{ background: "#fcfcfc", color: "#4e81d1" }}
           aria-label="Read-only agent activity. Select a node for details; drag the canvas to pan."
         >
           <Background

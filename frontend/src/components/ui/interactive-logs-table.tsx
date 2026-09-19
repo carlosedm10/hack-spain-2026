@@ -18,15 +18,15 @@ export interface Log {
 }
 
 const levelStyles: Record<LogLevel, string> = {
-  info: "bg-blue-50 text-blue-700",
-  warning: "bg-yellow-100 text-yellow-800",
-  error: "bg-red-100 text-red-700",
+  info: "bg-[#ece8e3] text-[#4a443c]",
+  warning: "bg-[#ebe6d2] text-[#7a4a24]",
+  error: "bg-[#f6e6e4] text-[#b42318]",
 };
 
 const rowStyles: Record<LogLevel, string> = {
-  info: "bg-white hover:bg-zinc-50",
-  warning: "bg-yellow-50 hover:bg-yellow-100/70",
-  error: "bg-red-50 hover:bg-red-100/70",
+  info: "bg-[#fcfcfc] hover:bg-[#f2f2f2]",
+  warning: "bg-[#f7f4e8] hover:bg-[#ebe6d2]",
+  error: "bg-[#f9ecea] hover:bg-[#f6e6e4]",
 };
 
 function LogRow({
@@ -90,7 +90,7 @@ function LogRow({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden border-t border-zinc-100 bg-zinc-50"
+            className="overflow-hidden border-t border-zinc-100 bg-[#f2f2f2]"
           >
             <div className="space-y-3 p-4 text-xs">
               <p className="whitespace-pre-wrap break-words font-mono text-zinc-800 [overflow-wrap:anywhere]">
@@ -136,7 +136,7 @@ export function InteractiveLogsTable({ logs }: { logs: Log[] }) {
   return (
     <section
       aria-label="Container logs"
-      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-[#fcfcfc]"
     >
       <header className="flex h-10 shrink-0 items-center border-b border-zinc-200 px-4">
         <h2 className="text-sm font-semibold text-zinc-900">Container logs</h2>

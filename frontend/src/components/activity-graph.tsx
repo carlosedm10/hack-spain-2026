@@ -40,12 +40,12 @@ export type ActivityNode = Node<
 >;
 
 const levels = [
-  { label: "Benign", color: "#16814c", background: "#eef9f1" },
-  { label: "Mild", color: "#a46708", background: "#fff8e8" },
-  { label: "Moderate", color: "#a46708", background: "#fff8e8" },
-  { label: "Severe", color: "#c74a27", background: "#fff2ed" },
-  { label: "Critical", color: "#d32f3c", background: "#fff0f1" },
-  { label: "Catastrophic", color: "#8f1d2c", background: "#fcebed" },
+  { label: "Benign", color: "#027a48", background: "#dde8d8" },
+  { label: "Mild", color: "#b06a38", background: "#ebe6d2" },
+  { label: "Moderate", color: "#b06a38", background: "#ebe6d2" },
+  { label: "Severe", color: "#d9584b", background: "#f6e6e4" },
+  { label: "Critical", color: "#d12a2a", background: "#f6e6e4" },
+  { label: "Catastrophic", color: "#b42318", background: "#f0d3cf" },
 ];
 
 export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
@@ -53,7 +53,7 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
   const verdict = item.kind === "classified" ? levels[item.level] : undefined;
   const awaiting = item.kind === "pending";
   const structural = item.kind === "structure";
-  const color = awaiting ? "#2563eb" : (verdict?.color ?? "#667085");
+  const color = awaiting ? "#1447e6" : (verdict?.color ?? "#736f6a");
   const status = awaiting
     ? "Awaiting Jev"
     : structural
@@ -92,13 +92,13 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
           height: NODE_HEIGHT,
           borderRadius: 12,
           padding: "12px 14px",
-          background: verdict?.background ?? "#fff",
-          border: `1px solid ${selected ? color : awaiting ? "#b9d0fd" : verdict ? `${color}55` : "#e1e5eb"}`,
+          background: verdict?.background ?? "#fcfcfc",
+          border: `1px solid ${selected ? color : awaiting ? "#c3ccf0" : verdict ? `${color}55` : "#dad5cc"}`,
           boxShadow: selected
             ? `0 0 0 2px ${color}25, 0 5px 16px #172b4d10`
             : "0 2px 6px #172b4d06",
           cursor: "pointer",
-          color: "#182230",
+          color: "#1a1614",
         }}
       >
         <Handle
@@ -127,7 +127,7 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
           {item.kind === "classified" && Number.isFinite(item.confidence) && (
             <span
               title="Jev confidence, independent of severity level"
-              style={{ marginLeft: "auto", color: "#7b8492", fontWeight: 500 }}
+              style={{ marginLeft: "auto", color: "#736f6a", fontWeight: 500 }}
             >
               {Math.round(item.confidence * 100)}%
             </span>
@@ -152,7 +152,7 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
             alignItems: "center",
             gap: 5,
             marginTop: 8,
-            color: "#7b8492",
+            color: "#736f6a",
             fontSize: 10,
           }}
         >

@@ -130,7 +130,7 @@ test("logs show all entries with UTC timestamps and expandable details without s
   );
   expect(container.textContent).toContain("Capture started");
   expect(button("Unexpected outbound request").className).toContain(
-    "bg-yellow-50",
+    "bg-[#f7f4e8]",
   );
   act(() => root.render(<InteractiveLogsTable logs={[]} />));
   expect(container.textContent).toContain("Waiting for container logs.");

@@ -21,7 +21,6 @@ import {
   useGraphStream,
   type GraphStreamStatus,
 } from "@/graph/useGraphStream";
-import { cn } from "@/lib/utils";
 
 const EMPTY_GRAPH: Graph = { revision: 0, root: null, nodes: new Map() };
 
@@ -59,7 +58,7 @@ function Dashboard({
             ? "Agent safety dashboard · simulated data"
             : "Agent safety dashboard"
         }
-        className="mx-auto min-h-dvh max-w-[1920px] bg-white p-4 text-zinc-900"
+        className="mx-auto min-h-dvh max-w-[1920px] bg-[#fdfcf4] p-4 text-zinc-900"
       >
         <header
           aria-label="AngryRobot"
@@ -93,7 +92,7 @@ function Dashboard({
             {(selected || pendingSelected) && (
               <section
                 aria-label="Selected action analysis"
-                className="max-h-56 shrink-0 overflow-y-auto border-t bg-white p-4"
+                className="max-h-56 shrink-0 overflow-y-auto border-t bg-[#fcfcfc] p-4"
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <h3 className="text-sm font-semibold">{inspectorTitle}</h3>
@@ -120,14 +119,26 @@ function Dashboard({
                 {selected?.event && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
                     <span
-                      className={cn(
-                        "rounded-md border px-2 py-1 font-medium",
+                      className="rounded-md border px-2 py-1 font-medium"
+                      style={
                         selected.level >= 3
-                          ? "border-red-200 bg-red-50 text-red-700"
+                          ? {
+                              borderColor: "#e0a49c",
+                              background: "#f6e6e4",
+                              color: "#b42318",
+                            }
                           : selected.level > 0
-                            ? "border-amber-200 bg-amber-50 text-amber-800"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                      )}
+                            ? {
+                                borderColor: "#d5c9a3",
+                                background: "#ebe6d2",
+                                color: "#7a4a24",
+                              }
+                            : {
+                                borderColor: "#a5c4ae",
+                                background: "#dde8d8",
+                                color: "#027a48",
+                              }
+                      }
                     >
                       L{selected.level} · {LEVEL_LABELS[selected.level]}
                     </span>

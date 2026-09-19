@@ -4,39 +4,40 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* HappyRobot brand palette (see happyrobot.ai design tokens) */
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --background: #fdfcf4;
+  --foreground: #1a1614;
+  --card: #fcfcfc;
+  --card-foreground: #1a1614;
+  --popover: #fcfcfc;
+  --popover-foreground: #1a1614;
+  --primary: #1a1614;
+  --primary-foreground: #fdfcf4;
+  --secondary: #ece8e3;
+  --secondary-foreground: #1a1614;
+  --muted: #ece8e3;
+  --muted-foreground: #736f6a;
+  --accent: #ece8e3;
+  --accent-foreground: #1a1614;
+  --destructive: #d9584b;
+  --border: #dad5cc;
+  --input: #dad5cc;
+  --ring: #736f6a;
 
-  /* beautifului tokens (subset used by task-rows) */
-  --surface: oklch(1 0 0);
-  --inset: oklch(0.979 0.002 247.839);
-  --ink: oklch(0.247 0.006 258.361);
-  --ink-2: oklch(0.506 0.01 264.477);
-  --ink-3: oklch(0.695 0.009 264.505);
-  --line: oklch(0.946 0.003 264.542);
-  --green: oklch(0.603 0.155 150.883);
-  --green-tint: oklch(0.958 0.017 159.118);
-  --orange: oklch(0.689 0.179 49.902);
-  --orange-tint: oklch(0.964 0.021 67.581);
-  --red: oklch(0.621 0.192 23.042);
-  --red-tint: oklch(0.956 0.017 17.462);
+  /* beautifului tokens (subset used by task-rows), re-tinted to brand */
+  --surface: #fcfcfc;
+  --inset: #f2f2f2;
+  --ink: #1a1614;
+  --ink-2: #736f6a;
+  --ink-3: #a59a8d;
+  --line: #ece8e3;
+  --green: #027a48;
+  --green-tint: #dde8d8;
+  --orange: #b06a38;
+  --orange-tint: #ebe6d2;
+  --red: #d9584b;
+  --red-tint: #f6e6e4;
   --shadow-card: 0 0 0 1px var(--line), 0 1px 2px oklch(0 0 0 / 0.05);
 }
 

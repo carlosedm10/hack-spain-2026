@@ -55,9 +55,9 @@ describe("chainEdges", () => {
     );
     expect(result.map((edge) => edge.level)).toEqual([2, 2, 4]);
     expect(result.map((edge) => LEVEL_STROKE[edge.level])).toEqual([
-      "#f59e0b",
-      "#f59e0b",
-      "#ef4444",
+      "#b06a38",
+      "#b06a38",
+      "#d12a2a",
     ]);
   });
 

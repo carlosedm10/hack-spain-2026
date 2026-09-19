@@ -1,12 +1,12 @@
 import type { Graph } from "@/graph/protocol";
 
 export const LEVEL_STROKE = [
-  "#22c55e",
-  "#eab308",
-  "#f59e0b",
-  "#f97316",
-  "#ef4444",
-  "#b91c1c",
+  "#5fa46b",
+  "#d59566",
+  "#b06a38",
+  "#d9584b",
+  "#d12a2a",
+  "#b42318",
 ];
 
 export type ChainEdge = {
