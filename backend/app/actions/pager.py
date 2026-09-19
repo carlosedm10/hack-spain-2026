@@ -133,6 +133,10 @@ class HappyRobotPager:
             "nivel_gravedad": str(level),
             "nombre_contacto": self._name,
             "telefono": self._phone,
+            "nodos": (
+                f"{(intent or 'actividad peligrosa').replace('_', ' ')}. "
+                f"Nivel {level}. {action_taken.rstrip('.')}."
+            ),
         }
         response = await self._request(
             client,

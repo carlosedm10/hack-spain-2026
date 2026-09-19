@@ -249,6 +249,7 @@ async def test_posts_documented_payload_with_telefono_and_numeric_level():
             "nivel_gravedad": "4",
             "nombre_contacto": "Guli",
             "telefono": "+34600000000",
+            "nodos": "sandbox escape. Nivel 4. Contained all live runs.",
         }
     ]
     assert "one minute" in stub.payloads[0]["pautas"]

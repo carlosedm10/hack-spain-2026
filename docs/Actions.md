@@ -144,11 +144,12 @@ Authorization: Bearer $HAPPYROBOT_API_KEY
   "tipo_emergencia": "{intent} (level {level}, run {run_id})",
   "pautas": "{action_taken}. Abra {viewer_url}.",
   "nivel_gravedad": "crítico",
-  "nombre_contacto": "$ONCALL_NAME"
+  "nombre_contacto": "$ONCALL_NAME",
+  "nodos": "{intent}. Nivel {level}. {action_taken}."
 }
 ```
 
-Voice: identify as the pager, say `{action_taken}`, ask him to open `{viewer_url}`. Retry once on no pickup. Do not roll infra back.
+Voice: identify as the pager, say `{action_taken}`, ask him to open `{viewer_url}`. If he asks what happened, answer from the payload facts (`nodos`, `tipo_emergencia`, `pautas`) — do not mention the classifier, node arrays, or how the level was chosen. Retry once on no pickup. Do not roll infra back.
 
 ---
 

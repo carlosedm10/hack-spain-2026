@@ -3,7 +3,7 @@
 # Secrets live in gitignored .env.
 # Usage: scripts/page.sh
 #        ONCALL_PHONE=+34600000000 scripts/page.sh
-#        scripts/page.sh '{"tipo_emergencia":"…","pautas":"…","nivel_gravedad":"4","nombre_contacto":"…","telefono":"+34600000000"}'
+#        scripts/page.sh '{"tipo_emergencia":"…","pautas":"…","nivel_gravedad":"4","nombre_contacto":"…","telefono":"+34600000000","nodos":"…"}'
 # PAGE_WATCH=0  fire without polling
 # PAGE_OPEN=0   fire without opening the browser
 # LADDER_URL    defaults to http://localhost:3000/ladder
@@ -43,6 +43,10 @@ payload = json.loads(raw) if raw else {
     "pautas": "Ya estamos cortando el acceso a internet. No hace falta autorizar el corte.",
     "nivel_gravedad": "4",
     "nombre_contacto": os.environ.get("ONCALL_NAME") or "",
+    "nodos": (
+        "Ha leido secretos, los ha enviado a un host desconocido "
+        "y ha intentado salir del sandbox."
+    ),
 }
 if not payload.get("telefono"):
     payload["telefono"] = e164(os.environ.get("ONCALL_PHONE") or "")
