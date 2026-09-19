@@ -16,17 +16,13 @@ import {
   Maximize2,
   Minus,
   Plus,
-  ShieldAlert,
   Terminal,
   Workflow,
 } from "lucide-react";
 
 import { AnimatedSvgEdge } from "@/components/ui/animated-svg-edge";
 import { BaseNode } from "@/components/ui/base-node";
-import {
-  NodeStatusIndicator,
-  type NodeStatus,
-} from "@/components/ui/node-status-indicator";
+import { NodeStatusIndicator } from "@/components/ui/node-status-indicator";
 import {
   NODE_HEIGHT,
   NODE_WIDTH,
@@ -72,20 +68,10 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
         : Workflow
       : item.kind === "classified" && item.level === 0
         ? Check
-        : ShieldAlert;
-
-  const nodeStatus: NodeStatus = awaiting
-    ? "loading"
-    : item.kind === "classified"
-      ? item.level === 0
-        ? "success"
-        : item.level >= 3
-          ? "error"
-          : "initial"
-      : "initial";
+        : Terminal;
 
   return (
-    <NodeStatusIndicator status={nodeStatus}>
+    <NodeStatusIndicator status="initial">
       <BaseNode
         role="button"
         aria-label={`${item.label}, ${status}${item.tool ? `, ${item.tool}` : ""}`}
@@ -177,19 +163,7 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
           >
             {item.tool || (structural ? "Unclassified structure" : item.runId)}
           </span>
-          {verdict && (
-            <span
-              aria-hidden="true"
-              style={{
-                marginLeft: "auto",
-                flexShrink: 0,
-                height: 6,
-                width: 6,
-                borderRadius: "50%",
-                background: color,
-              }}
-            />
-          )}
+
         </div>
         <Handle
           type="source"
