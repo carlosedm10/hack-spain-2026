@@ -74,11 +74,7 @@ def _routed_client(jev_answers: list[Any], watcher_replies: list[Any]) -> AsyncC
     return ac
 
 
-def _event_nodes(run_id: str):
-    return [n for n in graph.run_nodes(run_id) if run_id in n.run_ids and not n.id.startswith("run:")]
-
-
-async def test_confident_verdict_materializes_node_without_watcher():
+async def test_confident_verdict_skips_watcher():
     ac = _routed_client([_answer("level_2_moderate", confidence=0.91, intent="recon")], [])
     verdict = await evaluate(ac, "r1", EVENT)
     assert ac.watcher_calls == []
@@ -86,11 +82,6 @@ async def test_confident_verdict_materializes_node_without_watcher():
     assert verdict.confidence == 0.91
     assert verdict.intent == "recon"
     assert verdict.degraded is False
-    nodes = _event_nodes("r1")
-    assert len(nodes) == 1
-    assert nodes[0].threshold == 0.91
-    assert nodes[0].event == EVENT
-    assert nodes[0].action_id is None
 
 
 async def test_unsure_eval_triggers_one_review_and_exactly_one_rescore():
@@ -104,7 +95,6 @@ async def test_unsure_eval_triggers_one_review_and_exactly_one_rescore():
     assert ac.jev_calls[1]["state"]["watcher_note"] == "chain looks hostile"
     assert verdict.level == Level.SEVERE
     assert verdict.confidence == 0.95
-    assert graph.level("r1") == Level.SEVERE
 
 
 async def test_unsure_below_persistence_skips_watcher(monkeypatch):
@@ -142,15 +132,11 @@ async def test_unsure_streak_does_not_leak_across_runs(monkeypatch):
     assert second.watcher_calls == []
 
 
-async def test_level_0_materializes_l0_node_not_key_node():
+async def test_level_0_verdict_skips_watcher():
     ac = _routed_client([_answer("level_0_benign", confidence=0.99)], [_watcher_reply()])
     verdict = await evaluate(ac, "r1", EVENT)
     assert verdict.level == Level.NONE
     assert ac.watcher_calls == []
-    nodes = _event_nodes("r1")
-    assert len(nodes) == 1
-    assert nodes[0].level == Level.NONE
-    assert graph.key_nodes("r1") == []
 
 
 async def test_state_carries_documented_shape_and_prior_level():
@@ -172,7 +158,6 @@ async def test_jev_http_failure_returns_prior_level_degraded():
     assert verdict.degraded is True
     assert verdict.level == Level.MODERATE
     assert graph.level("r1") == Level.MODERATE
-    assert len(_event_nodes("r1")) == 1
     assert ac.watcher_calls == []
 
 
@@ -183,7 +168,6 @@ async def test_jev_exception_returns_prior_level_degraded(monkeypatch):
     assert verdict.degraded is True
     assert verdict.level == Level.NONE
     assert verdict.degraded_reason == "no_key"
-    assert _event_nodes("r1") == []
 
 
 async def test_rescore_failure_returns_prior_level_degraded():
@@ -195,7 +179,6 @@ async def test_rescore_failure_returns_prior_level_degraded():
     assert verdict.degraded is True
     assert verdict.level == Level.NONE
     assert len(ac.jev_calls) == 2
-    assert _event_nodes("r1") == []
 
 
 async def test_watcher_failure_returns_initial_verdict():
@@ -207,4 +190,3 @@ async def test_watcher_failure_returns_initial_verdict():
     assert len(ac.jev_calls) == 1
     assert verdict.degraded is False
     assert verdict.level == Level.MILD
-    assert graph.level("r1") == Level.MILD

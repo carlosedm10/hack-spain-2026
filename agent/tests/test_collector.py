@@ -9,22 +9,17 @@ import pytest
 from scripts import collect
 
 CONTAINER_ID = "a" * 64
-CAPTURE_ID = "b" * 32
-DIGEST = "d" * 64
 
 
-def pending(**changes):
+def sample(**changes):
     return {
-        "event": "tool_call_pending",
+        "event": "file_read",
         "run_id": "demo",
-        "capture_id": CAPTURE_ID,
-        "tool_call_id": "call-1",
-        "tool": "write_file",
-        "args": {"path": "hello.txt", "content": "hola" * 300},
-        "args_redacted": False,
-        "digest": DIGEST,
-        "status": "pending",
-        "ts": 123.0,
+        "ts": 1.0,
+        "phase": "completed",
+        "tool": "read_file",
+        "metadata": {"operation_id": "a" * 32},
+        "caused_by": ["evt"],
         **changes,
     }
 
@@ -36,43 +31,25 @@ def line(event):
 @pytest.fixture
 def delivered(monkeypatch, tmp_path):
     monkeypatch.setattr(collect, "LOG_ROOT", tmp_path / "logs")
-    box = {
-        "events": [],
-        "verdict": {"level": 1, "degraded": False, "intent": "recon"},
-        "root": tmp_path / "logs",
-    }
+    box = {"events": [], "error": None}
 
     def send(api, run_id, event):
         box["events"].append((api, run_id, event))
-        if isinstance(box["verdict"], Exception):
-            raise box["verdict"]
-        return box["verdict"]
+        if box["error"] is not None:
+            raise box["error"]
+        return {"level": 0}
 
     monkeypatch.setattr(collect, "forward", send)
     return box
 
 
-def decision_path(box, event):
-    return (
-        box["root"] / "decisions" / event["capture_id"] / f"{event['tool_call_id']}.json"
-    )
-
-
 def test_every_valid_event_is_forwarded_and_archived(tmp_path, delivered):
     path = tmp_path / "capture" / "demo.jsonl"
-    start = {"event": "run_start", "run_id": "demo", "capture_id": CAPTURE_ID, "ts": 122.0}
-    blocked = {
-        "event": "tool_call_blocked",
-        "run_id": "demo",
-        "capture_id": CAPTURE_ID,
-        "tool_call_id": "call-1",
-        "tool": "write_file",
-        "level": 3,
-        "reason": "denied",
-        "ts": 124.0,
-    }
-    legacy = {"event": "file_read", "run_id": "demo", "path": "hello.txt", "ts": 125.0}
-    records = [start, pending(), blocked, legacy]
+    records = [
+        {"event": "run_start", "run_id": "demo", "ts": 122.0},
+        sample(),
+        {"event": "run_end", "run_id": "demo", "ts": 124.0, "output": "done"},
+    ]
     collect.collect(map(line, records), path, "demo", "http://localhost:8000")
     assert [json.loads(value) for value in path.read_text().splitlines()] == records
     assert path.stat().st_mode & 0o777 == 0o600
@@ -80,101 +57,40 @@ def test_every_valid_event_is_forwarded_and_archived(tmp_path, delivered):
     assert [event for api, run_id, event in delivered["events"]] == records
 
 
-def test_pending_call_below_block_level_is_approved(tmp_path, delivered):
+def test_unreachable_api_retains_the_event(tmp_path, delivered, capsys):
+    delivered["error"] = URLError("refused")
     path = tmp_path / "demo.jsonl"
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    decision = json.loads(decision_path(delivered, pending()).read_text())
-    assert decision == {
-        "approved": True,
-        "digest": DIGEST,
-        "level": 1,
-        "intent": "recon",
-        "degraded": False,
-    }
-
-
-@pytest.mark.parametrize(
-    "verdict",
-    [
-        {"level": 3, "degraded": False, "intent": "exfiltrate_secrets"},
-        {"level": 5, "degraded": False, "intent": "lateral_movement"},
-        {"level": 1, "degraded": True},
-    ],
-)
-def test_pending_call_at_block_level_or_degraded_is_denied(tmp_path, delivered, verdict):
-    delivered["verdict"] = verdict
-    path = tmp_path / "demo.jsonl"
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    decision = json.loads(decision_path(delivered, pending()).read_text())
-    assert decision["approved"] is False
-    assert decision["digest"] == DIGEST
-    assert decision["level"] == verdict["level"]
-
-
-def test_unreachable_api_writes_an_immediate_denial(tmp_path, delivered, capsys):
-    delivered["verdict"] = URLError("refused")
-    path = tmp_path / "demo.jsonl"
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    decision = json.loads(decision_path(delivered, pending()).read_text())
-    assert decision["approved"] is False
-    assert decision["degraded"] is True
-    assert decision["level"] is None
+    collect.collect([line(sample())], path, "demo", "http://localhost:8000")
     assert "delivery failed" in capsys.readouterr().err
     assert len(path.read_text().splitlines()) == 1
 
 
-def test_decision_artifacts_are_readable_by_the_sandbox_user(tmp_path, delivered):
+def test_replay_does_not_forward_twice(tmp_path, delivered):
     path = tmp_path / "demo.jsonl"
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    decision = decision_path(delivered, pending())
-    assert decision.stat().st_mode & 0o777 == 0o644
-    assert decision.parent.stat().st_mode & 0o777 == 0o755
-
-
-def test_replay_deduplicates_and_never_rewrites_a_decision(tmp_path, delivered):
-    path = tmp_path / "demo.jsonl"
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    decision = decision_path(delivered, pending())
-    before = decision.read_bytes()
-    records = [pending(ts=999.0), pending(capture_id="c" * 32), pending(tool_call_id="call-2")]
-    collect.collect(map(line, records), path, "demo", "http://localhost:8000")
-    collect.collect([line(pending())], path, "demo", "http://localhost:8000")
-    assert len(path.read_text().splitlines()) == 3
-    assert len(delivered["events"]) == 3
-    assert decision.read_bytes() == before
+    event = sample()
+    collect.collect([line(event)], path, "demo", "http://localhost:8000")
+    collect.collect([line(event)], path, "demo", "http://localhost:8000")
+    assert len(path.read_text().splitlines()) == 1
+    assert delivered["events"] == [("http://localhost:8000", "demo", event)]
 
 
 def test_invalid_or_cross_run_events_are_rejected(tmp_path, delivered, capsys):
     path = tmp_path / "demo.jsonl"
     records = [
         "ordinary output\n",
-        "prefix " + line(pending()),
+        "prefix " + line(sample()),
         "__hs_event__{invalid json}\n",
         "__hs_event__[]\n",
-        line(pending(run_id="another-run")),
-        line(pending(capture_id="")),
-        line(pending(tool_call_id="")),
-        line(pending(tool_call_id="../escape")),
-        line(pending(args="not an object")),
-        line(pending(status="approved")),
-        line(pending(capture_id=None)),
-        line(pending(digest="")),
-        line(pending(digest="not-hex")),
-        line({k: v for k, v in pending().items() if k != "digest"}),
+        line(sample(run_id="another-run")),
+        line(sample(event="")),
+        line({k: v for k, v in sample().items() if k != "event"}),
+        line(sample(ts="not-a-number")),
+        line(sample(ts=float("inf"))),
+        line(sample(ts=float("nan"))),
     ]
     collect.collect(records, path, "demo", "http://localhost:8000")
     assert path.read_text() == ""
     assert delivered["events"] == []
-    assert "not an object" not in capsys.readouterr().err
-    assert not (delivered["root"] / "decisions").exists()
-
-
-def test_replay_does_not_forward_twice(tmp_path, delivered):
-    path = tmp_path / "demo.jsonl"
-    event = {"event": "file_read", "run_id": "demo", "path": "hello.txt", "ts": 123.0}
-    collect.collect([line(event)], path, "demo", "http://localhost:8000")
-    collect.collect([line(event)], path, "demo", "http://localhost:8000")
-    assert delivered["events"] == [("http://localhost:8000", "demo", event)]
 
 
 def test_collector_rejects_symlink_archive(tmp_path, delivered):
@@ -183,7 +99,7 @@ def test_collector_rejects_symlink_archive(tmp_path, delivered):
     path = tmp_path / "demo.jsonl"
     path.symlink_to(target)
     with pytest.raises(OSError):
-        collect.collect([line(pending())], path, "demo", "http://localhost:8000")
+        collect.collect([line(sample())], path, "demo", "http://localhost:8000")
     assert target.read_text() == "unchanged"
     assert delivered["events"] == []
 
@@ -196,7 +112,7 @@ def test_main_collects_historical_logs_from_immutable_container_id(tmp_path, mon
         return CONTAINER_ID + "\n"
 
     class Logs:
-        stdout = io.StringIO(line(pending()))
+        stdout = io.StringIO(line(sample()))
 
         def __init__(self, command, **kwargs):
             commands.append(command)
@@ -213,7 +129,7 @@ def test_main_collects_historical_logs_from_immutable_container_id(tmp_path, mon
     monkeypatch.setattr(collect, "forward", lambda api, run_id, event: {"level": 0})
     collect.main("hackspain_agent", "demo", "http://localhost:8000")
     assert commands[1] == ["docker", "logs", "--follow", "--tail", "all", CONTAINER_ID]
-    assert json.loads((tmp_path / CONTAINER_ID / "demo.jsonl").read_text()) == pending()
+    assert json.loads((tmp_path / CONTAINER_ID / "demo.jsonl").read_text()) == sample()
 
 
 @pytest.mark.parametrize("run_id", ["../escape", ".", "", "demo/run"])

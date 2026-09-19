@@ -11,7 +11,6 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-hackspain:5432/${POSTGRES_DB:-hackspain}
       - NEO4J_URI=bolt://neo4j-hackspain:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-hackspain-local}
@@ -24,36 +23,11 @@ services:
       - ./experiments:/experiments
       - run_tapes_hackspain:/var/lib/hackspain/runs
     depends_on:
-      postgres-hackspain:
-        condition: service_healthy
       neo4j-hackspain:
         condition: service_healthy
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - appnet_hackspain
-
-  postgres-hackspain:
-    container_name: hackspain_db
-    image: postgres:18-alpine
-    env_file:
-      - .env
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-hackspain}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data_hackspain:/var/lib/postgresql
-    networks:
-      - appnet_hackspain
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      # pg_isready answers instantly — poll fast so the backend starts sooner.
-      interval: 2s
-      timeout: 3s
-      retries: 15
-      start_period: 3s
 
   neo4j-hackspain:
     container_name: hackspain_graph
@@ -101,7 +75,6 @@ services:
       - appnet_hackspain
 
 volumes:
-  postgres_data_hackspain:
   neo4j_data_hackspain:
   neo4j_logs_hackspain:
   run_tapes_hackspain:

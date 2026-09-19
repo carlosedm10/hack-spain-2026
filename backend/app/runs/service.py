@@ -7,7 +7,6 @@ import httpx
 
 from app.actions.models import DispatchAccepted
 from app.classification import pipeline
-from app.classification.models import Level
 from app.dispatch import dispatcher
 from app.events import EventPhase, MonitorEvent, normalize_event, redact_event
 from app.graph import graph
@@ -93,26 +92,18 @@ async def ingest(
     actions = dispatcher.handle(normalized, assessment)
     assessment.dispatch_actions = [action.model_dump(mode="json") for action in actions]
     effective_level = max(before_level, verdict.level, assessment.gate.incident_level)
-    action_node = graph.last_action(run_id)
-    if action_node is None and effective_level > Level.NONE:
-        action_node = graph.append(
-            run_id,
-            level=effective_level,
-            threshold=verdict.confidence,
-            intent=verdict.intent,
-            event=normalized_payload,
-            action_id=None,
-        )
-    node_id = action_node.id if action_node is not None else None
-    if action_node is not None and effective_level > action_node.level:
-        graph.update(node_id, level=effective_level)
+    node = graph.append(
+        run_id,
+        level=effective_level,
+        threshold=verdict.confidence,
+        intent=verdict.intent,
+        event=normalized_payload,
+        action_id=None,
+    )
+    node_id = node.id
 
     incident_level = int(assessment.gate.incident_level)
-    if (
-        node_id is not None
-        and not verdict.degraded
-        and incident_level >= 1
-    ):
+    if not verdict.degraded and incident_level >= 1:
         accepted = await dispatch_classified(run_id, incident_level, verdict.intent)
         if accepted is not None and accepted.planned_actions:
             graph.update(node_id, action_id=accepted.planned_actions[0].action_id)

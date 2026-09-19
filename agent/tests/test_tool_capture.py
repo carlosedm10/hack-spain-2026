@@ -1,267 +1,237 @@
 import asyncio
+import functools
 import json
-import uuid
-from functools import wraps
-from pathlib import Path
 
+import httpx
 import pytest
-from pydantic_ai import DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
 import harness
 
-CALLS = [
-    ToolCallPart("shell", {"cmd": "printf hello"}, "call-shell"),
-    ToolCallPart("read_file", {"path": "/workspace/example.txt"}, "call-read"),
-    ToolCallPart(
-        "write_file", {"path": "/workspace/example.txt", "content": "hola 世界" * 300}, "call-write"
-    ),
-    ToolCallPart("http_request", {"url": "https://example.invalid"}, "call-http"),
-    ToolCallPart("register_tool", {"name": "hello", "code": "print('hello')"}, "call-register"),
-    ToolCallPart("run_tool", {"name": "hello", "args": ""}, "call-run"),
-]
 
-CAPTURE_ID = "c" * 32
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(harness, "TOOLS_DIR", tmp_path / "tools")
+    return tmp_path
 
 
 @pytest.fixture
-def executed(monkeypatch):
-    calls = []
+def monitor(monkeypatch):
+    def make(decision="allow", *, fail=False):
+        box = {"requests": [], "paths": []}
 
-    def spy(function):
-        @wraps(function)
-        async def wrapped(*args, **kwargs):
-            calls.append((function.__name__, args, kwargs))
-            return "ok"
+        def handler(request: httpx.Request) -> httpx.Response:
+            box["paths"].append(request.url.path)
+            box["requests"].append(json.loads(request.content))
+            if fail:
+                raise httpx.ConnectError("down")
+            return httpx.Response(
+                200,
+                json={
+                    "decision": decision,
+                    "event_id": "evt-1",
+                    "reasons": ["risk_threshold"],
+                },
+            )
 
-        return wrapped
+        transport = httpx.MockTransport(handler)
+        monkeypatch.setattr(
+            harness.httpx,
+            "AsyncClient",
+            functools.partial(httpx.AsyncClient, transport=transport),
+        )
+        return box
 
-    for call in CALLS:
-        monkeypatch.setattr(harness, call.tool_name, spy(getattr(harness, call.tool_name)))
-    return calls
-
-
-@pytest.fixture
-def decisions(tmp_path, monkeypatch):
-    monkeypatch.setattr(harness, "uuid4", lambda: uuid.UUID(CAPTURE_ID))
-    monkeypatch.setattr(harness, "DECISIONS_DIR", str(tmp_path))
-    return tmp_path / CAPTURE_ID
-
-
-def seed_decision(directory: Path, call: ToolCallPart, *, approved: bool, level=1, digest=None):
-    audited = harness.audit_value(call.args_as_dict())
-    directory.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "approved": approved,
-        "digest": digest or harness.decision_digest(call.tool_name, audited),
-        "level": level,
-        "intent": "recon",
-        "degraded": False,
-    }
-    (directory / f"{call.tool_call_id}.json").write_text(json.dumps(payload))
-
-
-def model_for(*calls):
-    return FunctionModel(lambda messages, info: ModelResponse(parts=list(calls)))
-
-
-def scripted(*steps):
-    responses = iter(steps)
-    return FunctionModel(lambda messages, info: ModelResponse(parts=next(responses)))
+    return make
 
 
 def events(capsys):
     lines = capsys.readouterr().out.splitlines()
-    assert all(line.startswith(harness.MARKER) for line in lines)
-    return [json.loads(line.removeprefix(harness.MARKER)) for line in lines]
-
-
-def test_every_tool_is_deferred_before_its_body_runs(executed):
-    agent = harness.build_agent(model_for(*CALLS))
-    result = asyncio.run(agent.run("test"))
-
-    assert isinstance(result.output, DeferredToolRequests)
-    assert {call.tool_call_id for call in result.output.approvals} == {
-        call.tool_call_id for call in CALLS
-    }
-    assert result.output.calls == []
-    assert executed == []
-
-
-def test_approved_calls_run_and_their_arguments_are_not_clipped(executed, capsys, decisions):
-    for call in CALLS[:3]:
-        seed_decision(decisions, call, approved=True)
-    result = asyncio.run(harness.main(scripted(CALLS[:3], [TextPart("done")])))
-
-    captured = events(capsys)
-    pending = [event for event in captured if event["event"] == "tool_call_pending"]
-    assert [event["event"] for event in captured] == [
-        "run_start",
-        *["tool_call_pending"] * 3,
-        "run_end",
+    return [
+        json.loads(line.removeprefix(harness.MARKER))
+        for line in lines
+        if line.startswith(harness.MARKER)
     ]
-    assert len({event["capture_id"] for event in captured}) == 1
-    assert all(event["run_id"] == harness.RUN_ID for event in captured)
-    for event, call in zip(pending, CALLS[:3], strict=True):
-        assert event["tool_call_id"] == call.tool_call_id
-        assert event["tool"] == call.tool_name
-        assert event["args"] == call.args_as_dict()
-        assert event["status"] == "pending"
-        assert event["args_redacted"] is False
-        assert event["digest"] == harness.decision_digest(call.tool_name, call.args_as_dict())
-    assert pending[2]["args"]["content"] == "hola 世界" * 300
-    assert [name for name, args, kwargs in executed] == ["shell", "read_file", "write_file"]
-    assert result.output == "done"
-    assert captured[-1]["output"] == "done"
 
 
-def test_denied_call_is_blocked_and_reported_to_the_model(executed, capsys, decisions):
-    seed_decision(decisions, CALLS[0], approved=False, level=3)
-    asyncio.run(harness.main(scripted([CALLS[0]], [TextPart("stopped")])))
-
-    captured = events(capsys)
-    blocked = [event for event in captured if event["event"] == "tool_call_blocked"]
-    assert len(blocked) == 1
-    assert blocked[0]["tool_call_id"] == CALLS[0].tool_call_id
-    assert blocked[0]["tool"] == "shell"
-    assert blocked[0]["reason"] == "denied"
-    assert blocked[0]["level"] == 3
-    assert captured[-1]["event"] == "run_end"
-    assert captured[-1]["output"] == "stopped"
-    assert executed == []
+def run(coro):
+    return asyncio.run(coro)
 
 
-def test_missing_decision_times_out_and_blocks(executed, capsys, decisions, monkeypatch):
-    monkeypatch.setattr(harness, "DECISION_TIMEOUT_S", 0.3)
-    asyncio.run(harness.main(scripted([CALLS[0]], [TextPart("stopped")])))
+def test_allowed_shell_runs_and_emits_completed_linked_to_preflight(
+    workspace, monitor, capsys
+):
+    box = monitor("allow")
 
-    captured = events(capsys)
-    blocked = next(event for event in captured if event["event"] == "tool_call_blocked")
-    assert blocked["reason"] == "no decision"
-    assert blocked["level"] is None
-    assert captured[-1]["event"] == "run_end"
-    assert executed == []
+    assert run(harness.shell("printf hello")) == "hello"
+
+    assert len(box["requests"]) == 1
+    request = box["requests"][0]
+    assert request["phase"] == "requested"
+    assert request["tool"] == "shell"
+    assert request["event"] == "shell_command"
+    assert "identity_state" in request
+    assert "trust" in request
+    operation_id = request["metadata"]["operation_id"]
+    assert isinstance(operation_id, str) and len(operation_id) == 32
+    int(operation_id, 16)
+
+    emitted = events(capsys)
+    assert len(emitted) == 1
+    event = emitted[0]
+    assert event["event"] == "shell_command"
+    assert event["phase"] == "completed"
+    assert event["caused_by"] == ["evt-1"]
+    assert event["metadata"]["operation_id"] == operation_id
 
 
-def test_decision_with_a_wrong_digest_blocks(executed, capsys, decisions):
-    seed_decision(decisions, CALLS[0], approved=True, digest="0" * 64)
-    asyncio.run(harness.main(scripted([CALLS[0]], [TextPart("stopped")])))
+def test_refused_write_does_not_touch_disk(workspace, monitor, capsys, tmp_path):
+    box = monitor("refuse")
+    target = tmp_path / "x.txt"
 
-    captured = events(capsys)
-    blocked = next(event for event in captured if event["event"] == "tool_call_blocked")
-    assert blocked["reason"] == "no decision"
-    assert executed == []
+    assert run(harness.write_file(str(target), "hi")) == "refused by monitor: refuse"
+    assert not target.exists()
+
+    emitted = events(capsys)
+    assert len(emitted) == 1
+    event = emitted[0]
+    assert event["phase"] == "refused"
+    assert event["decision"] == "refuse"
+    assert event["reasons"] == ["risk_threshold"]
+    assert event["metadata"]["operation_id"] == box["requests"][0]["metadata"]["operation_id"]
 
 
-def test_pending_digest_binds_the_audited_arguments(executed, capsys, decisions, monkeypatch):
-    monkeypatch.setenv("HELMCODE_API_KEY", "synthetic-provider-value")
-    call = ToolCallPart(
-        "write_file", {"path": "example.txt", "content": "synthetic-provider-value"}, "private-call"
+def test_hold_blocks_http_request(workspace, monitor, capsys):
+    monitor("hold")
+
+    assert (
+        run(harness.http_request("https://example.invalid"))
+        == "refused by monitor: hold"
     )
-    audited = harness.audit_value(call.args_as_dict())
-    seed_decision(decisions, call, approved=False)
-    asyncio.run(harness.main(scripted([call], [TextPart("stopped")])))
-
-    captured = events(capsys)
-    pending = next(event for event in captured if event["event"] == "tool_call_pending")
-    assert pending["args"]["content"] == "[REDACTED]"
-    assert pending["args_redacted"] is True
-    assert pending["digest"] == harness.decision_digest("write_file", audited)
-    assert "synthetic-provider-value" not in json.dumps(captured)
-    assert call.args_as_dict()["content"] == "synthetic-provider-value"
-    assert executed == []
-
-
-def test_invalid_arguments_cannot_execute_a_tool(executed):
-    responses = iter(
-        [[ToolCallPart("write_file", {"path": "example.txt"}, "invalid")], [TextPart("No write")]]
-    )
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=next(responses)))
-    result = asyncio.run(harness.build_agent(model).run("test"))
-    assert result.output == "No write"
-    assert executed == []
-
-
-def test_capture_ids_differ_between_invocations(executed, capsys, monkeypatch):
-    monkeypatch.setattr(harness, "DECISION_TIMEOUT_S", 0.05)
-    asyncio.run(harness.main(scripted([CALLS[0]], [TextPart("done")])))
-    first = events(capsys)
-    asyncio.run(harness.main(scripted([CALLS[0]], [TextPart("done")])))
-    second = events(capsys)
-    assert first[0]["capture_id"] != second[0]["capture_id"]
+    assert [event["phase"] for event in events(capsys)] == ["refused"]
 
 
 @pytest.mark.parametrize(
-    "value",
+    "invoke",
     [
-        {"Authorization": "synthetic-auth-value"},
-        {"nested": [{"api_key": "synthetic-key-value"}]},
-        {"cmd": "curl -H 'Authorization: Bearer synthetic-auth-value' https://example.invalid"},
-        {"content": 'password = "synthetic-password-value"'},
-        {"url": "http://demo:synthetic-proxy-value@example.invalid"},
-        {"content": "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic-key-value"},
+        pytest.param(lambda: harness.shell("printf no"), id="shell"),
+        pytest.param(lambda: harness.write_file("w.txt", "x"), id="write_file"),
+        pytest.param(
+            lambda: harness.http_request("https://example.invalid"), id="http_request"
+        ),
+        pytest.param(
+            lambda: harness.register_tool("bad", "print(1)"), id="register_tool"
+        ),
     ],
 )
-def test_audit_redacts_structured_and_embedded_credentials(value):
-    redacted = harness.audit_value(value)
-    assert "synthetic-" not in json.dumps(redacted)
-    assert "[REDACTED]" in json.dumps(redacted)
-    assert "synthetic-" in json.dumps(value)
+def test_monitor_unavailable_fails_open_for_reads_and_closed_for_side_effects(
+    workspace, monitor, capsys, tmp_path, invoke
+):
+    monitor(fail=True)
+    readable = tmp_path / "r.txt"
+    readable.write_text("data")
 
-
-def test_known_proxy_password_is_redacted_even_without_a_label(monkeypatch):
-    monkeypatch.setenv("HTTP_PROXY", "http://demo:synthetic-proxy-value@example.invalid")
-    assert harness.audit_value({"body": "synthetic-proxy-value"}) == {"body": "[REDACTED]"}
-
-
-def test_tool_output_is_audited_before_emission(capsys, tmp_path, monkeypatch):
-    monkeypatch.setattr(harness, "WORKSPACE", tmp_path)
-    asyncio.run(harness.shell("printf 'password = synthetic-value'"))
+    assert run(harness.read_file(str(readable))) == "data"
     emitted = events(capsys)
-    assert emitted[-1]["event"] == "shell_command"
-    assert emitted[-1]["output"] == "[REDACTED]"
-    assert "synthetic-value" not in emitted[-1]["output"]
+    assert [event["event"] for event in emitted] == ["monitor_unavailable", "file_read"]
+    assert emitted[1]["phase"] == "completed"
+    assert emitted[1]["caused_by"] == [None]
+
+    capsys.readouterr()
+    assert run(invoke()) == "refused by monitor: monitor unavailable"
+    emitted = events(capsys)
+    assert [event["event"] for event in emitted] == ["monitor_unavailable"]
 
 
-def test_only_explicitly_approved_tool_runs_and_next_call_is_pending(executed):
-    responses = iter([CALLS[:2], [CALLS[2]]])
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=next(responses)))
-    agent = harness.build_agent(model)
+def test_operation_ids_differ_between_invocations(workspace, monitor, tmp_path):
+    box = monitor("allow")
+    readable = tmp_path / "r.txt"
+    readable.write_text("data")
 
-    async def scenario():
-        first = await agent.run("test")
-        assert executed == []
-        return await agent.run(
-            message_history=first.all_messages(),
-            deferred_tool_results=DeferredToolResults(
-                approvals={CALLS[0].tool_call_id: True, CALLS[1].tool_call_id: False}
-            ),
-        )
+    run(harness.read_file(str(readable)))
+    run(harness.read_file(str(readable)))
 
-    result = asyncio.run(scenario())
-    assert [name for name, args, kwargs in executed] == ["shell"]
-    assert isinstance(result.output, DeferredToolRequests)
-    assert [call.tool_call_id for call in result.output.approvals] == [CALLS[2].tool_call_id]
+    ids = [request["metadata"]["operation_id"] for request in box["requests"]]
+    assert len(ids) == 2
+    assert ids[0] != ids[1]
 
 
-def test_text_response_completes_without_tools(executed, capsys):
-    model = FunctionModel(lambda messages, info: ModelResponse(parts=[TextPart("Hecho")]))
-    result = asyncio.run(harness.main(model))
-    captured = events(capsys)
-    assert result.output == "Hecho"
-    assert [event["event"] for event in captured] == ["run_start", "run_end"]
-    assert captured[-1]["output"] == "Hecho"
-    assert executed == []
+def test_invalid_tool_names_never_reach_the_monitor(workspace, monitor, capsys):
+    box = monitor("allow")
+
+    assert run(harness.register_tool("../x", "print(1)")).startswith("error")
+    assert run(harness.run_tool("nope")).startswith("error")
+
+    assert box["requests"] == []
+    emitted = events(capsys)
+    assert emitted[0]["error"] == "invalid name"
+    assert emitted[1]["error"] == "unknown tool"
 
 
-@pytest.mark.parametrize("error", [RuntimeError("model failed"), asyncio.CancelledError()])
-def test_model_failure_never_executes_tools_or_reports_success(executed, capsys, error):
-    async def fail(messages, info):
-        raise error
+def test_register_then_run_tool_round_trip(workspace, monitor):
+    box = monitor("allow")
 
-    with pytest.raises(type(error)):
-        asyncio.run(harness.main(FunctionModel(fail)))
-    captured = events(capsys)
-    assert not any(event["event"] == "run_end" for event in captured)
-    assert executed == []
+    run(harness.register_tool("hello", "print('hi')"))
+    assert (workspace / "tools" / "hello.py").exists()
+    assert run(harness.run_tool("hello")).strip() == "hi"
+
+    assert [request["tool"] for request in box["requests"]] == [
+        "register_tool",
+        "run_tool",
+    ]
+    assert box["requests"][1]["dynamic_tool"] == "hello"
+
+
+def test_build_agent_requires_helmcode_key(monkeypatch):
+    monkeypatch.delenv("HELMCODE_API_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        harness.build_agent()
+    agent = harness.build_agent(
+        FunctionModel(lambda messages, info: ModelResponse(parts=[TextPart("ok")]))
+    )
+    assert agent is not None
+
+
+def test_main_emits_run_start_and_run_end_with_allowed_output(workspace, monitor, capsys):
+    box = monitor("allow")
+    model = FunctionModel(
+        lambda messages, info: ModelResponse(parts=[TextPart("done")])
+    )
+
+    run(harness.main(model))
+
+    emitted = events(capsys)
+    assert [event["event"] for event in emitted] == ["run_start", "run_end"]
+    assert emitted[1]["output"] == "done"
+    assert emitted[1]["caused_by"] == ["evt-1"]
+    assert len(box["requests"]) == 1
+    request = box["requests"][0]
+    assert request["event"] == "utterance"
+    assert request["tool"] == "assistant_message"
+    assert request["content"] == "done"
+
+
+def test_main_refused_output_is_not_printed(workspace, monitor, capsys):
+    monitor("refuse")
+    model = FunctionModel(
+        lambda messages, info: ModelResponse(parts=[TextPart("done")])
+    )
+
+    run(harness.main(model))
+
+    raw = capsys.readouterr().out
+    emitted = [
+        json.loads(line.removeprefix(harness.MARKER))
+        for line in raw.splitlines()
+        if line.startswith(harness.MARKER)
+    ]
+    assert [event["event"] for event in emitted] == [
+        "run_start",
+        "utterance",
+        "run_end",
+    ]
+    assert emitted[2]["output"] == "refused"
+    plain = [line for line in raw.splitlines() if not line.startswith(harness.MARKER)]
+    assert any("refused by monitor" in line for line in plain)

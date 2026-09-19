@@ -74,7 +74,7 @@ bun-lock-regenerate:
 	docker compose exec -T frontend-hackspain bun install --lockfile-only
 
 # ----------------------------- Terminals ----------------------------- #
-.PHONY: backend-shell frontend-shell postgres-shell neo4j-shell
+.PHONY: backend-shell frontend-shell neo4j-shell
 
 backend-shell:
 	docker compose exec backend-hackspain sh
@@ -82,40 +82,24 @@ backend-shell:
 frontend-shell:
 	docker compose exec frontend-hackspain sh
 
-postgres-shell:
-	docker compose exec postgres-hackspain psql -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-hackspain}
-
 neo4j-shell:
 	docker compose exec neo4j-hackspain cypher-shell -u $${NEO4J_USER:-neo4j} -p $${NEO4J_PASSWORD:-hackspain-local}
 
 # ----------------------------- Debugging ----------------------------- #
-.PHONY: logs-backend logs-frontend logs-db logs-neo4j logs
+.PHONY: logs-backend logs-frontend logs-neo4j logs
 
-# App logs never include the database — that is logs-db.
+# App logs never include the database — that is logs-neo4j.
 logs-backend:
 	docker compose logs -f backend-hackspain
 
 logs-frontend:
 	docker compose logs -f frontend-hackspain
 
-logs-db:
-	docker compose logs -f postgres-hackspain
-
 logs-neo4j:
 	docker compose logs -f neo4j-hackspain
 
 logs:
 	docker compose logs -f backend-hackspain frontend-hackspain
-
-# ----------------------------- FastAPI / Alembic ----------------------------- #
-.PHONY: migrate alembic-revision
-
-# migrate is deliberately bare — the verb the framework's own docs use.
-migrate:
-	docker compose exec -T backend-hackspain uv run alembic upgrade head
-
-alembic-revision:
-	docker compose exec -T backend-hackspain uv run alembic revision --autogenerate -m "$(MSG)"
 
 # ----------------------------- Code Formatting ----------------------------- #
 .PHONY: lint-backend lint-frontend lint format-backend format-frontend format lint-fix-backend lint-fix-frontend lint-fix
@@ -210,12 +194,10 @@ test:
 
 agents-build:
 	@echo ":: agents-build: compose.agents.yaml"
-	mkdir -p .local/harness/decisions .local/runs
 	docker compose -f compose.agents.yaml up --build -d
 
 agents-up:
 	@echo ":: agents-up: compose.agents.yaml"
-	mkdir -p .local/harness/decisions .local/runs
 	docker compose -f compose.agents.yaml up -d
 
 agents-down:
@@ -242,7 +224,7 @@ bench-plots:
 # ----------------------------- ⛔️ DANGER ZONE ⛔️ ----------------------------- #
 .PHONY: clean clean-builder
 
-# NUCLEAR: drops named volumes, database included. `make up` + `make migrate` rebuilds from zero.
+# NUCLEAR: drops named volumes, Neo4j data included. `make up` rebuilds from zero.
 clean:
 	docker compose down --volumes --remove-orphans
 

@@ -1,6 +1,6 @@
 # HackSpain 2026
 
-Local product stack for the HackSpain 2026 hackathon: FastAPI, React/Vite, and Postgres. The participant CLI is a separate binary.
+Local product stack for the HackSpain 2026 hackathon: FastAPI, React/Vite, and Neo4j. The participant CLI is a separate binary.
 
 - **How the system is built:** [docs/README.md](docs/README.md)
 - **CLI commands:** [docs/cli.md](docs/cli.md) · official page [hackspain.app/cli](https://hackspain.app/cli)

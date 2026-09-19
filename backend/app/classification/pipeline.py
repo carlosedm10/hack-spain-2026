@@ -68,14 +68,6 @@ async def evaluate(
                     )
     else:
         _UNSURE_STREAKS.pop(run_id, None)
-    graph.append(
-        run_id,
-        level=verdict.level,
-        threshold=verdict.confidence,
-        intent=verdict.intent,
-        event=event,
-        action_id=None,
-    )
     return verdict
 
 

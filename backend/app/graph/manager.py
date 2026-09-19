@@ -24,15 +24,17 @@ def _signature(
 ) -> str:
     """Stable action signature used to collapse repeated/related actions into one graph node.
 
-    When the event carries no distinguishing fields we fall back to a per-run
-    sequence id so that legacy/unit-test appends still get distinct nodes.
+    We reuse a node only when the action is semantically specific: kind plus at
+    least one of tool, target, or args. Generic events (only a kind/event name)
+    fall back to a per-run sequence id so unrelated actions stay distinct and
+    legacy/unit-test appends keep stable ids.
     """
     if isinstance(event, dict):
         kind = event.get("kind") or event.get("event")
         tool = event.get("tool")
         target = event.get("target") or event.get("path") or event.get("dst") or event.get("cmd")
         args = event.get("args")
-        if kind or tool or target or args:
+        if kind and (tool or target or args):
             key = json.dumps(
                 {"kind": kind, "tool": tool, "target": target, "args": args},
                 sort_keys=True,
