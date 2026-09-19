@@ -23,7 +23,10 @@ import {
 
 import { AnimatedSvgEdge } from "@/components/ui/animated-svg-edge";
 import { BaseNode } from "@/components/ui/base-node";
-import { NodeStatusIndicator } from "@/components/ui/node-status-indicator";
+import {
+  NodeStatusIndicator,
+  type NodeStatus,
+} from "@/components/ui/node-status-indicator";
 import {
   NODE_HEIGHT,
   NODE_WIDTH,
@@ -71,10 +74,18 @@ export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
         ? Check
         : ShieldAlert;
 
+  const nodeStatus: NodeStatus = awaiting
+    ? "loading"
+    : item.kind === "classified"
+      ? item.level === 0
+        ? "success"
+        : item.level >= 3
+          ? "error"
+          : "initial"
+      : "initial";
+
   return (
-    <NodeStatusIndicator
-      status={awaiting && !reducedMotion ? "loading" : "initial"}
-    >
+    <NodeStatusIndicator status={nodeStatus}>
       <BaseNode
         role="button"
         aria-label={`${item.label}, ${status}${item.tool ? `, ${item.tool}` : ""}`}

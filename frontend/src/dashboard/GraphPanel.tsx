@@ -21,7 +21,6 @@ import type { PendingAction } from "@/dashboard/demo";
 import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "@/dashboard/graph-layout";
 import type { Graph } from "@/graph/protocol";
 import type { GraphStreamStatus } from "@/graph/useGraphStream";
-import { chainEdges, LEVEL_STROKE } from "@/live/path";
 import { cn } from "@/lib/utils";
 
 export type GraphPanelProps = {
@@ -50,7 +49,6 @@ export function GraphPanel({
   const reducedMotion = useReducedMotion();
 
   const layout = useMemo(() => layoutGraph(graph, pending), [graph, pending]);
-  const chain = useMemo(() => chainEdges(graph), [graph]);
 
   const seen = useRef(new Set<string>());
   const fresh = useMemo(
@@ -81,53 +79,21 @@ export function GraphPanel({
     [layout.nodes, fresh, selectedNodeId, reducedMotion, onSelectNode],
   );
   const edges = useMemo<Edge[]>(() => {
-    const chainIds = new Set(chain.map((edge) => edge.id));
-    const structural: Edge[] = layout.links
-      .filter((link) => !chainIds.has(link.id))
-      .map((link) => ({
-        id: link.id,
-        source: link.source,
-        target: link.target,
-        type: link.pending && !reducedMotion ? "activity" : "default",
-        data: {
-          duration: 2.5,
-          direction: "alternate",
-          path: "bezier",
-          shape: "circle",
-        },
-        style: {
-          stroke: link.pending ? "#a8bbef" : "#dad5cc",
-          strokeWidth: 1.5,
-          strokeDasharray: link.pending ? "4 4" : undefined,
-        },
-        selectable: false,
-        focusable: false,
-      }));
-    const paths: Edge[] = chain.map((edge) => {
-      const stroke =
-        LEVEL_STROKE[Math.min(edge.level, LEVEL_STROKE.length - 1)];
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: reducedMotion ? "default" : "activity",
-        data: {
-          duration: edge.latest ? 1.2 : 2.6,
-          direction: "forward",
-          path: "bezier",
-          shape: "circle",
-        },
-        style: {
-          stroke,
-          strokeWidth: edge.latest ? 2.5 : 1.75,
-          filter: edge.latest ? `drop-shadow(0 0 6px ${stroke})` : undefined,
-        },
-        selectable: false,
-        focusable: false,
-      };
-    });
-    return [...structural, ...paths];
-  }, [layout.links, chain, reducedMotion]);
+    return layout.links.map((link) => ({
+      id: link.id,
+      source: link.source,
+      target: link.target,
+      type: link.pending && !reducedMotion ? "activity" : "default",
+      data: { duration: 3, path: "bezier" },
+      style: {
+        stroke: link.pending ? "#a8bbef" : "#c8c3bc",
+        strokeWidth: 1.5,
+        strokeDasharray: link.pending ? "4 4" : undefined,
+      },
+      selectable: false,
+      focusable: false,
+    }));
+  }, [layout.links, reducedMotion]);
   const nodeKey = JSON.stringify(layout.nodes.map((node) => node.id));
   const pill = status === null ? null : STATUS_PILL[status];
 

@@ -19,7 +19,7 @@ import {
 import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "@/dashboard/graph-layout";
 import type { Graph } from "@/graph/protocol";
 import type { GraphStreamStatus } from "@/graph/useGraphStream";
-import { chainEdges, LEVEL_STROKE } from "@/live/path";
+import { LEVEL_STROKE } from "@/live/path";
 
 const noop = () => {};
 
@@ -39,10 +39,6 @@ export function LiveGraph({ graph, status }: LiveGraphProps) {
   const layout = useMemo(
     () =>
       graph === null ? { nodes: [], links: [] } : layoutGraph(graph, null),
-    [graph],
-  );
-  const chain = useMemo(
-    () => (graph === null ? [] : chainEdges(graph)),
     [graph],
   );
 
@@ -77,42 +73,17 @@ export function LiveGraph({ graph, status }: LiveGraphProps) {
   }, [fresh]);
 
   const edges = useMemo<Edge[]>(() => {
-    const chainIds = new Set(chain.map((edge) => edge.id));
-    const structural: Edge[] = layout.links
-      .filter((link) => !chainIds.has(link.id))
-      .map((link) => ({
-        id: link.id,
-        source: link.source,
-        target: link.target,
-        style: { stroke: "#2a364d", strokeWidth: 1.5 },
-        selectable: false,
-        focusable: false,
-      }));
-    const paths: Edge[] = chain.map((edge) => {
-      const stroke =
-        LEVEL_STROKE[Math.min(edge.level, LEVEL_STROKE.length - 1)];
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: reducedMotion ? "default" : "activity",
-        data: {
-          duration: edge.latest ? 1.2 : 2.6,
-          direction: "forward",
-          path: "bezier",
-          shape: "circle",
-        },
-        style: {
-          stroke,
-          strokeWidth: edge.latest ? 2.5 : 1.75,
-          filter: edge.latest ? `drop-shadow(0 0 6px ${stroke})` : undefined,
-        },
-        selectable: false,
-        focusable: false,
-      };
-    });
-    return [...structural, ...paths];
-  }, [layout.links, chain, reducedMotion]);
+    return layout.links.map((link) => ({
+      id: link.id,
+      source: link.source,
+      target: link.target,
+      type: reducedMotion ? "default" : "activity",
+      data: { duration: 3, path: "bezier" },
+      style: { stroke: "#4a5568", strokeWidth: 1.5 },
+      selectable: false,
+      focusable: false,
+    }));
+  }, [layout.links, reducedMotion]);
 
   const nodeKey = JSON.stringify(layout.nodes.map((node) => node.id));
   const maxLevel = layout.nodes.reduce(
