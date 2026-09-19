@@ -111,7 +111,7 @@ function Dashboard({
                     : selected?.event
                       ? eventText(
                           selected,
-                          ["summary", "label", "kind", "event"],
+                          ["content", "summary", "label", "kind", "event"],
                           "Classified action.",
                         )
                       : "Structural graph node. This groups the session or run; it is not a safety verdict."}

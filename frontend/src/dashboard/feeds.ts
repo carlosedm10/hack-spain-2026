@@ -51,7 +51,7 @@ export function logsFromGraph(graph: Graph): Log[] {
     timestamp: node.created_at ?? "",
     level: node.level >= 3 ? "error" : node.level >= 1 ? "warning" : "info",
     service: `run:${node.run_id}`,
-    message: eventText(node, ["label", "kind", "event"], node.id),
+    message: eventText(node, ["content", "label", "kind", "event"], node.id),
     duration: "—",
     status: `L${node.level}`,
     tags: [node.run_id ?? "", node.id, node.intent ?? ""].filter(Boolean),
