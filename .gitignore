@@ -32,15 +32,9 @@ dist/
 .turbo/
 out/
 
-# Docker
-postgres_data_*/
-
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
-
-# Alembic
-alembic/versions/*.pyc

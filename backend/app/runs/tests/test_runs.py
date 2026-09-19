@@ -141,8 +141,9 @@ class TestPostEvents:
     async def test_degraded_verdict_does_not_dispatch(self, client: AsyncClient, fresh, tape_dir, monkeypatch):
         monkeypatch.setattr(settings, "typesafe_api_key", "")
 
-        await client.post("/api/runs/demo/events", json={"event": "file_read"})
+        response = await client.post("/api/runs/demo/events", json={"event": "file_read"})
 
+        assert response.json()["node_id"] == "demo:1"
         from app.actions.router import get_action_service
 
         assert get_action_service().get_state("demo").accepted_level == 0
@@ -185,8 +186,13 @@ class TestPostEvents:
         body = response.json()
         assert body["degraded"] is True
         assert body["level"] == 0
-        assert body["node_id"] is None
+        assert body["node_id"] == "demo:1"
         assert (tape_dir / "demo.jsonl").exists()
+        node = graph.get_node("demo:1")
+        assert node.level == Level.NONE
+        assert node.threshold == 0.0
+        assert node.intent is None
+        assert graph.key_nodes("demo") == []
 
     async def test_sentinel_elevation_sticks_when_jev_is_degraded(
         self, client: AsyncClient, fresh, monkeypatch
@@ -201,9 +207,28 @@ class TestPostEvents:
 
         assert first.json()["degraded"] is True
         assert first.json()["level"] == 3
+        assert first.json()["node_id"] == "demo:1"
         assert second.json()["degraded"] is True
         assert second.json()["level"] == 3
+        assert second.json()["node_id"] == "demo:2"
         assert graph.level("demo") == Level.SEVERE
+        assert graph.get_node("demo:1").level == Level.SEVERE
+        assert graph.get_node("demo:2").level == Level.SEVERE
+
+    async def test_degraded_events_still_materialize_nodes(
+        self, client: AsyncClient, fresh, tape_dir, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "typesafe_api_key", "")
+
+        first = await client.post("/api/runs/demo/events", json={"event": "file_read"})
+        second = await client.post("/api/runs/demo/events", json={"event": "shell_command"})
+
+        assert first.json()["node_id"] == "demo:1"
+        assert second.json()["node_id"] == "demo:2"
+        nodes = [n for n in graph.run_nodes("demo") if n.id != "run:demo"]
+        assert [n.id for n in nodes] == ["demo:1", "demo:2"]
+        assert all(n.level == Level.NONE for n in nodes)
+        assert graph.key_nodes("demo") == []
 
     async def test_malformed_body_without_event_is_422(self, client: AsyncClient, fresh):
         response = await client.post("/api/runs/demo/events", json={"path": "/app/.env"})

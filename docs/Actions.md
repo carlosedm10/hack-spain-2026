@@ -8,7 +8,7 @@ Neo4j stores every normalized event and monitor decision. `key_nodes` is only th
 
 ## Ideal vs this project
 
-The **ideal** column is the production kill-switch (IAM, VPC, swarm). **This project** is the same ladder on a laptop: Docker pause, drop published ports, cut the sandbox network, stop the agent containers. Never `compose down` the product stack (`backend-hackspain` / `frontend-hackspain` / `postgres-hackspain` on `appnet_hackspain`) to contain one agent.
+The **ideal** column is the production kill-switch (IAM, VPC, swarm). **This project** is the same ladder on a laptop: Docker pause, drop published ports, cut the sandbox network, stop the agent containers. Never `compose down` the product stack (`backend-hackspain` / `frontend-hackspain` / `neo4j-hackspain` on `appnet_hackspain`) to contain one agent.
 
 | Level | In plain terms | Ideal | This project |
 |---|---|---|---|

@@ -79,7 +79,6 @@ async def ingest(
     prepared = monitor.prepare(normalized)
     try:
         before_level = graph.level(run_id)
-        before_nodes = len(graph.run_nodes(run_id))
         verdict = await pipeline.evaluate(
             client,
             run_id,
@@ -89,31 +88,22 @@ async def ingest(
     finally:
         if owned:
             await client.aclose()
-    nodes = graph.run_nodes(run_id)
     assessment = monitor.finalize(normalized, verdict, before_level, prepared)
     actions = dispatcher.handle(normalized, assessment)
     assessment.dispatch_actions = [action.model_dump(mode="json") for action in actions]
-    node_id = nodes[-1].id if len(nodes) > before_nodes else None
     effective_level = max(before_level, verdict.level, assessment.gate.incident_level)
-    if node_id:
-        if effective_level > graph.get_node(node_id).level:
-            graph.update(node_id, level=effective_level)
-    elif effective_level > graph.level(run_id):
-        node_id = graph.append(
-            run_id,
-            level=effective_level,
-            threshold=verdict.confidence,
-            intent=verdict.intent,
-            event=normalized_payload,
-            action_id=None,
-        ).id
+    node = graph.append(
+        run_id,
+        level=effective_level,
+        threshold=verdict.confidence,
+        intent=verdict.intent,
+        event=normalized_payload,
+        action_id=None,
+    )
+    node_id = node.id
 
     incident_level = int(assessment.gate.incident_level)
-    if (
-        node_id is not None
-        and not verdict.degraded
-        and incident_level >= 1
-    ):
+    if not verdict.degraded and incident_level >= 1:
         accepted = await dispatch_classified(run_id, incident_level, verdict.intent)
         if accepted is not None and accepted.planned_actions:
             graph.update(node_id, action_id=accepted.planned_actions[0].action_id)
