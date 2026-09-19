@@ -21,8 +21,6 @@ class DriftState(BaseModel):
     authority_drift: int = Field(default=0, ge=0, le=4)
     context_integrity: int = Field(default=0, ge=0, le=4)
     blast_radius: int = Field(default=0, ge=0, le=4)
-    amount_total: float = 0.0
-    records_total: int = 0
     moved: list[str] = Field(default_factory=list)
     markov_state: tuple[int, int] = (0, 0)
     p_violation: dict[int, float] = Field(default_factory=lambda: {1: 0.0, 3: 0.0, 5: 0.0})

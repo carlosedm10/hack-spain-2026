@@ -3,8 +3,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    secret_key: str = "change-me-in-production"
-    debug: bool = True
     typesafe_api_key: str = ""
     helmcode_base_url: str = "https://api.helmcode.com/v1"
     helmcode_api_key: str = ""
@@ -19,7 +17,6 @@ class Settings(BaseSettings):
     neo4j_password: str = "hackspain-local"
     neo4j_database: str = "neo4j"
     neo4j_enabled: bool = True
-    tool_hold_ms: int = 1500
     action_step_delay: float = 0.35
     action_dispatch_token: str = ""
     happyrobot_api_key: str = ""

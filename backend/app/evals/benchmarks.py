@@ -92,7 +92,7 @@ def _corpus_n() -> dict[str, int]:
     }
 
 
-def _method_block(*, ingest_events: int | None = None) -> dict[str, Any]:
+def _method_block() -> dict[str, Any]:
     n = _corpus_n()
     live = bool(settings.typesafe_api_key)
     return {

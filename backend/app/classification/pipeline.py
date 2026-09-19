@@ -16,11 +16,6 @@ def reset() -> None:
     _UNSURE_STREAKS.clear()
 
 
-def reset_watcher_invocations() -> None:
-    global _WATCHER_INVOCATIONS
-    _WATCHER_INVOCATIONS = 0
-
-
 def watcher_invocations() -> int:
     return _WATCHER_INVOCATIONS
 

@@ -47,7 +47,7 @@ const levels = [
   { label: "Catastrophic", color: "#b42318", background: "#f0d3cf" },
 ];
 
-export function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
+function ActivityCard({ data, selected }: NodeProps<ActivityNode>) {
   const { item, reducedMotion, onSelect } = data;
   const verdict = item.kind === "classified" ? levels[item.level] : undefined;
   const awaiting = item.kind === "pending";

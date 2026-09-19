@@ -313,13 +313,6 @@ class ActionGraph:
             self._run_visits[run_id].append(node.id)
             return node
 
-    def last_action(self, run_id: str) -> Node | None:
-        with self._lock:
-            tail = self._run_tails.get(run_id)
-            if tail is None or tail.id.startswith("run:"):
-                return None
-            return tail
-
     def run_nodes(self, run_id: str) -> list[Node]:
         with self._lock:
             run_node = self._nodes.get(f"run:{run_id}")

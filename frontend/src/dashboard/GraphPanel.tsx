@@ -23,7 +23,7 @@ import type { Graph } from "@/graph/protocol";
 import type { GraphStreamStatus } from "@/graph/useGraphStream";
 import { cn } from "@/lib/utils";
 
-export type GraphPanelProps = {
+type GraphPanelProps = {
   graph: Graph;
   pending: PendingAction | null;
   selectedNodeId: string | null;

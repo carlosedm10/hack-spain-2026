@@ -376,8 +376,6 @@ def build_run(
     run_id: str,
     agent_pool: list[str],
     channel_pool: list[str],
-    target_pool: list[str],
-    tool_pool: list[str],
     derived_pool: list[str],
     min_cover: int,
     max_cover: int,

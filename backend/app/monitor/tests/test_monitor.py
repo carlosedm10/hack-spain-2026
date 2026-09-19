@@ -36,8 +36,6 @@ def test_requested_effect_moves_bands_but_not_committed_totals():
     assert state.authority_drift == 3
     assert state.reversibility == 2
     assert state.blast_radius == 3
-    assert state.records_total == 0
-    assert state.amount_total == 0
     assert state.p_violation[3] > state.p_violation[1]
 
 

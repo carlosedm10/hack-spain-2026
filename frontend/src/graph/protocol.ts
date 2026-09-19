@@ -12,13 +12,13 @@ export type GraphNode = {
   created_at: string | null;
 };
 
-export type GraphSnapshot = {
+type GraphSnapshot = {
   revision: number;
   root: string | null;
   nodes: GraphNode[];
 };
 
-export type GraphUpdate = {
+type GraphUpdate = {
   revision: number;
   root: string | null;
   upsert_nodes: GraphNode[];

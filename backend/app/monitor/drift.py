@@ -4,7 +4,6 @@ import threading
 
 from app.events import (
     EventOrigin,
-    EventPhase,
     IdentityState,
     MonitorEvent,
     Reversibility,
@@ -107,9 +106,6 @@ class SafetyDrift:
                 raise_band("context_integrity", 3)
 
             scope = max(0, event.effect.scope)
-            if event.phase == EventPhase.COMPLETED:
-                current.records_total += scope
-                current.amount_total += float(event.effect.amount or 0.0)
             if scope > 100:
                 raise_band("blast_radius", 4)
             elif scope > 10:

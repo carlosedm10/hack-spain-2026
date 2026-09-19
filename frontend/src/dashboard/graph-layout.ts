@@ -17,7 +17,7 @@ export type ActivityItem = {
   | { kind: "classified"; level: number; confidence: number }
 );
 
-export type ActivityLink = {
+type ActivityLink = {
   id: string;
   source: string;
   target: string;

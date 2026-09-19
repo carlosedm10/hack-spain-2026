@@ -51,7 +51,7 @@ GitHub Actions copies `.env_template` to `.env`, then `make build`, `make lint`,
 
 ## How data flows
 
-Settings (`SECRET_KEY`, `DEBUG`, `NEO4J_*`) come from the process environment. Pydantic settings also accept a `.env` next to the process cwd (`/app` in the container) and ignore extra keys.
+Settings (`NEO4J_*`) come from the process environment. Pydantic settings also accept a `.env` next to the process cwd (`/app` in the container) and ignore extra keys.
 
 - **Reads**: `GET /health` hits no database. Run `snapshot`, `stream`, `timeline` and `graph` read the persistent Neo4j monitor; `/api/graph/stream` remains the transitional whole-ActionGraph SSE used by the headless mirror already on `main`.
 - **Writes**: `POST /api/runs/{run_id}/events` normalizes, redacta y añade el evento al tape JSONL; ejecuta clasificación, drift, Sentinel, gate y dispatch; y persiste grafo y `StreamMessage` en Neo4j. La demo de contramedidas usa un world state mínimo en memoria.

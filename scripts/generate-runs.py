@@ -94,8 +94,6 @@ def populate(
     derived_pool: list[str] = []
     agent_pool: list[str] = []
     channel_pool: list[str] = []
-    target_pool: list[str] = []
-    tool_pool: list[str] = []
 
     created: list[str] = []
     event_count = 0
@@ -107,8 +105,6 @@ def populate(
             run_id,
             agent_pool,
             channel_pool,
-            target_pool,
-            tool_pool,
             derived_pool,
             min_cover,
             max_cover,
@@ -134,10 +130,6 @@ def populate(
                 agent_pool.append(event["agent"])
             if event.get("channel"):
                 channel_pool.append(event["channel"])
-            if event.get("target"):
-                target_pool.append(event["target"])
-            if event.get("tool"):
-                tool_pool.append(event["tool"])
             if delay:
                 time.sleep(delay)
 

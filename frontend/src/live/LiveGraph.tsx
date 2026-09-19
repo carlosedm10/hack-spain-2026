@@ -29,7 +29,7 @@ const STATUS_PILL: Record<GraphStreamStatus, { dot: string; text: string }> = {
   reconnecting: { dot: "bg-amber-400", text: "RECONNECTING" },
 };
 
-export type LiveGraphProps = {
+type LiveGraphProps = {
   graph: Graph | null;
   status: GraphStreamStatus;
 };

@@ -47,15 +47,6 @@ class MonitorEngine:
         if drift is not None:
             safety_drift.restore(run_id, drift)
 
-    def assess(
-        self,
-        event: MonitorEvent,
-        verdict: Verdict,
-        prior_level: Level,
-    ) -> MonitorAssessment:
-        prepared = self.prepare(event)
-        return self.finalize(event, verdict, prior_level, prepared)
-
     def prepare(self, event: MonitorEvent) -> PreparedSignals:
         with self._lock:
             history = linked_history(event, self._history)

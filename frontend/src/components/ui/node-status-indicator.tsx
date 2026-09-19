@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
-export type NodeStatus = "loading" | "success" | "error" | "initial";
+type NodeStatus = "loading" | "success" | "error" | "initial";
 
-export type NodeStatusIndicatorProps = {
+type NodeStatusIndicatorProps = {
   status?: NodeStatus;
   children: ReactNode;
 };

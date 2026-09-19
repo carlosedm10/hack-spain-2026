@@ -44,10 +44,6 @@ class Neo4jGraphStore:
             await self._driver.close()
             self._driver = None
 
-    async def verify(self) -> None:
-        if self.enabled:
-            await self._get_driver().verify_connectivity()
-
     async def setup(self) -> None:
         if not self.enabled:
             return

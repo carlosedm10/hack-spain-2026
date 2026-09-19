@@ -137,14 +137,14 @@ const RetryIcon = (
 );
 
 /* One detail line shown when a task row is expanded. */
-export type TaskDetail = { label: string; meta: string };
+type TaskDetail = { label: string; meta: string };
 
 /* A single task row.
  *  - "done"     → green check badge + completed pill (static)
  *  - "running"  → active spinner showing `step`, no pill (static)
  *  - "sequence" → animation-driven: pending spinner → failed → completed
  */
-export type TaskRow = {
+type TaskRow = {
   key: string;
   label: string;
   amount: string;
@@ -154,7 +154,7 @@ export type TaskRow = {
   details: TaskDetail[];
 };
 
-export type TaskRowsLabels = {
+type TaskRowsLabels = {
   completed: string;
   failed: string;
 };

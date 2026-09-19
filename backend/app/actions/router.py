@@ -144,8 +144,6 @@ async def trigger_run(
         run_id,
         agent_pool=[],
         channel_pool=[],
-        target_pool=[],
-        tool_pool=[],
         derived_pool=[],
         min_cover=5,
         max_cover=8,
