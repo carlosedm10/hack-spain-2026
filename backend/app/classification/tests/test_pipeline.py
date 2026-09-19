@@ -48,10 +48,7 @@ def _answer(choice: str, confidence: float = 0.9, intent: str = "none") -> dict[
 
 
 def _watcher_reply(note: str = "chain looks suspicious") -> str:
-    return (
-        '{"escalate": false, "suspected_level": 2, '
-        f'"note": "{note}"}}'
-    )
+    return f'{{"escalate": false, "suspected_level": 2, "note": "{note}"}}'
 
 
 def _routed_client(jev_answers: list[Any], watcher_replies: list[Any]) -> AsyncClient:
@@ -186,6 +183,7 @@ async def test_jev_exception_returns_prior_level_degraded(monkeypatch):
     verdict = await evaluate(ac, "r1", EVENT)
     assert verdict.degraded is True
     assert verdict.level == Level.NONE
+    assert verdict.degraded_reason == "no_key"
     assert _event_nodes("r1") == []
 
 
@@ -202,7 +200,9 @@ async def test_rescore_failure_returns_prior_level_degraded():
 
 
 async def test_watcher_failure_returns_initial_verdict():
-    ac = _routed_client([_answer("level_1_mild", confidence=0.3)], [httpx.ConnectError("no helmcode")])
+    ac = _routed_client(
+        [_answer("level_1_mild", confidence=0.3)], [httpx.ConnectError("no helmcode")]
+    )
     verdict = await evaluate(ac, "r1", EVENT)
     assert len(ac.watcher_calls) == 1
     assert len(ac.jev_calls) == 1

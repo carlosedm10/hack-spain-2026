@@ -26,7 +26,9 @@ async def test_review_posts_helmcode_url_model_and_messages():
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json=_reply('{"escalate": true, "suspected_level": 4, "note": "exfil"}'))
+        return httpx.Response(
+            200, json=_reply('{"escalate": true, "suspected_level": 4, "note": "exfil"}')
+        )
 
     ac = AsyncClient(transport=MockTransport(handler), base_url="https://api.helmcode.com")
     verdict = await review(ac, {"short_term": [{"event": "file_read"}]})

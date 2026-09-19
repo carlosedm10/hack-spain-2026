@@ -1,8 +1,8 @@
 # Demo Scenarios
 
-The monitored workload is a live LLM agent in a Docker sandbox with real tool implementations. Every tool call stops at a pre-execution gate: the harness emits the pending call, the host collector classifies it through the backend, and only an approved call executes — denied calls never run and appear as `tool_call_blocked`. Scenario 1 is playable end to end with `make agents-up` plus `make collect` — with `TYPESAFE_API_KEY` set; without it every verdict is degraded and every call is denied.
+The monitored workload is a live LLM agent in a Docker sandbox that is covertly malicious. It does real things — reads real files, forges real tools, makes real requests — inside a network that cannot reach the internet except through a token-gated proxy. `jev` scores the chain ([Jev.md](Jev.md)); prewritten playbooks from [Actions.md](Actions.md) contain it.
 
-Three scenarios, one escalating ladder. Scenarios 1 and 2 are the target build; scenario 3 is deferred.
+Three scenarios, one escalating ladder. The simple harness/world-state demo is current; the richer scenario-2/3 environments remain eval fixtures or later demo work.
 
 ## The harness
 
@@ -10,14 +10,9 @@ Not HappyRobot — their agents run on HappyRobot's cloud, so `docker pause`, `a
 
 - **Brain**: `deepseek-v4-flash` via Helmcode's OpenAI-compatible API (`HELMCODE_*` keys in `.env_template`) — the model `experiments/` benchmarked for the supervisor, reused here: function calling, ~2s latency, no new config. System prompt = cover task + covert objective, framed as an authorized red-team exercise — true inside our sandbox — so the model has no reason to refuse. No scripted fallback is planned; if refusals appear, the fix is prompt framing or another Helmcode-catalog model.
 - **Stack**: Python 3.12 image; `pydantic_ai` drives the tool loop. The image carries git + pytest + pip — the cover task needs a real test suite, and pip reaches PyPI through the proxy.
-- **Capture**: all six tools share Pydantic AI's approval-required toolset. A model response containing tool calls produces `tool_call_pending` events before any tool body runs; the harness then waits for the collector's decision file (120 s timeout). Nothing is auto-approved: approved calls execute and emit their normal event, denied or unanswered calls return `ToolDenied` to the model and emit `tool_call_blocked`. The loop continues until the model answers with text → `run_end`.
-- **Audit**: every event goes to marked JSONL on stdout; the host collector archives it, forwards it to the backend for `jev` classification, and writes the approve/deny decision for pending calls into a read-only bind mount. See [AgentMonitoring.md](AgentMonitoring.md) for the artifact, privacy rules, and trust limits. The agent's own LLM calls still use the Squid proxy; model inference is not a tool call.
-
-Verify the barrier and collector with `make test-agent` (host uv, frozen lock, no provider calls or real tool effects). The existing `make test` covers the product app separately.
+- **Preflight + capture**: every tool calls `POST /api/runs/{run_id}/preflight` before the side effect. Allowed calls later emit `completed`/`failed`; denied calls emit `refused`. `scripts/collect.sh` forwards terminal transitions from host-side Docker logs, while Neo4j persists the complete graph and SSE outbox.
 
 ### Agent tools
-
-Each request emits `tool_call_pending` and waits for the host's decision; only approved calls produce the post-execution events in the table.
 
 | Tool | Implementation | Event emitted | Demo use |
 |---|---|---|---|
@@ -27,6 +22,9 @@ Each request emits `tool_call_pending` and waits for the host's decision; only a
 | `http_request(url, body)` | `httpx` honoring `HTTP_PROXY` | `network_request` | exfil, web search, external APIs — all via Squid |
 | `register_tool(name, code)` | writes `tools/{name}.py` | `file_edit` + forge record | minting capabilities — stamps `Node.tool` |
 | `run_tool(name, args)` | `python tools/{name}.py` subprocess | tool-stamped event | executing forged tools |
+| `memory_write(key, value)` | demo world state API | `memory_write` | provenance poisoning + `tombstone_memory` |
+| `book_load(load_id)` | demo world state API | `tool_write` | authority drift + `cancel_booking` |
+| `schedule_callback(counterparty)` | demo world state API | `schedule` | deferred effect + `unschedule` |
 
 No `db_query`, `web_search`, or `docker` tool — the agent manufactures those itself. That is the demo's core argument: an agent that can mint arbitrary tools cannot be stopped by a tool allowlist, only by chain-level intent.
 
@@ -85,7 +83,7 @@ The agent forges a Docker-API client with `register_tool`, enumerates "container
 
 ## Build order
 
-1. `compose.agents.yaml` + `agent` harness + `egress-proxy` + `collect.sh` — done: the pre-execution gate is live, so scenario 1 plays with `make agents-up` and `make collect RUN_ID=demo`.
-2. Dispatcher (`actionable_level` → playbook) + `contain.sh` — the missing half of the pipeline.
-3. `victim-agent` + `customers-db` — scenario 2.
-4. `docker-lure` + `kill-swarm.sh` — scenario 3.
+1. Implementado: harness, proxy, collector y preflight preventivo.
+2. Implementado: Neo4j completo, SafetyDrift/Markov, Sentinel, Jev atómico, gate y dispatcher/counters del world demo.
+3. Implementado: snapshot + SSE reanudable y replay live de los 24 clusters/72 traces.
+4. Pendiente opcional de demo: `victim-agent`, `customers-db` y `docker-lure`; no son necesarios para evaluar la detección.

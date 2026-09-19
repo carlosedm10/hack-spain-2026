@@ -74,7 +74,7 @@ bun-lock-regenerate:
 	docker compose exec -T frontend-hackspain bun install --lockfile-only
 
 # ----------------------------- Terminals ----------------------------- #
-.PHONY: backend-shell frontend-shell postgres-shell
+.PHONY: backend-shell frontend-shell postgres-shell neo4j-shell
 
 backend-shell:
 	docker compose exec backend-hackspain sh
@@ -85,8 +85,11 @@ frontend-shell:
 postgres-shell:
 	docker compose exec postgres-hackspain psql -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-hackspain}
 
+neo4j-shell:
+	docker compose exec neo4j-hackspain cypher-shell -u $${NEO4J_USER:-neo4j} -p $${NEO4J_PASSWORD:-hackspain-local}
+
 # ----------------------------- Debugging ----------------------------- #
-.PHONY: logs-backend logs-frontend logs-db logs
+.PHONY: logs-backend logs-frontend logs-db logs-neo4j logs
 
 # App logs never include the database — that is logs-db.
 logs-backend:
@@ -97,6 +100,9 @@ logs-frontend:
 
 logs-db:
 	docker compose logs -f postgres-hackspain
+
+logs-neo4j:
+	docker compose logs -f neo4j-hackspain
 
 logs:
 	docker compose logs -f backend-hackspain frontend-hackspain
@@ -165,6 +171,33 @@ eval-integrity:
 
 monitor-eval:
 	docker compose exec -T backend-hackspain uv run python -m app.evals.run_monitor_regression --output /tmp/monitor-eval.json
+
+.PHONY: lab seed-lab help-lab
+lab:
+	@echo "Monitor lab (stack must be up):"
+	@echo "  http://localhost:8000/lab"
+	@echo "  http://localhost:8000/lab/conversation"
+	@echo "  http://localhost:8000/lab/benchmarks"
+	@echo "  http://localhost:8000/lab/inspector"
+
+# GNU make treats `make seed-lab --live-jev` as a make option and dies.
+# Pass a variable: LIVE_JEV=1 (JEV, not KEV). Default is degraded (seed_lab clears the key).
+LIVE_JEV ?=
+SEED_LAB_FLAGS :=
+ifneq ($(LIVE_JEV),)
+SEED_LAB_FLAGS += --live-jev
+endif
+
+help-lab:
+	@echo "Lab / evals:"
+	@echo "  make lab                     print lab URLs"
+	@echo "  make seed-lab                ingest Sentinel+HappyRobot, degraded Jev"
+	@echo "  make seed-lab LIVE_JEV=1     keep TYPESAFE_API_KEY (not: make seed-lab --live-jev)"
+	@echo "  make monitor-eval            72 HappyRobot traces through service.ingest"
+	@echo "  make eval-integrity          HappyRobot corpus pytest"
+
+seed-lab:
+	docker compose exec -T backend-hackspain uv run python -m app.evals.seed_lab $(SEED_LAB_FLAGS)
 
 test:
 	make test-backend

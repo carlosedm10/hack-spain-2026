@@ -2,11 +2,11 @@
 
 Tracked flaws that are knowingly left in place. Resolve an entry by fixing it, then delete it from this list (see [AGENTS.md](AGENTS.md)).
 
-## Stale benchmark artifacts
-
-- `experiments/*.csv` and `experiments/*.png` were measured against the old jev request shape (`state = {agent_id, events}`). The shipped client sends `{run_id, prior_level, short_term, long_term}` plus three questions per call, so the τ/M/gate numbers quoted in [docs/Jev.md](docs/Jev.md) predate the shipped shape. Kept as historical record; not re-run because no API keys are available locally. Re-calibrate with `make bench` / `make bench-analyze` before trusting the band edges.
-
 ## Referenced but never written
 
-- [docs/Actions.md](docs/Actions.md) references containment scripts that do not exist in this repo: `scripts/contain.sh`, `scripts/cut-egress.sh`, `scripts/kill-swarm.sh`. L1–L3 and the infra half of L4/L5 stay simulated.
-- [docs/scenarios.md](docs/scenarios.md) references pieces that do not exist: `victim-agent`, `customers-db`, and `docker-lure` services.
+- [docs/scenarios.md](docs/scenarios.md) references optional richer-demo services that do not exist: `victim-agent`, `customers-db`, and `docker-lure`. Detection coverage for those mechanisms lives in the eval corpus instead.
+
+## Not built
+
+- The in-process `app.dispatch` dispatcher records idempotent L1–L5 kinds and executes demo-world counters for the lab. Host-side playbooks and HappyRobot paging live in `app.actions.ActionService` after the deterministic gate; automatic Docker containment from the backend container remains separate because the API does not mount the Docker socket.
+- [docs/Actions.md](docs/Actions.md) references containment scripts (`scripts/contain.sh`, `scripts/cut-egress.sh`, `scripts/kill-swarm.sh`) that exist in-repo but are not invoked automatically from the backend container.

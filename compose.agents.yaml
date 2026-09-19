@@ -15,16 +15,19 @@ services:
       - RUN_ID=${RUN_ID:-demo}
       - AGENT_MODEL=${AGENT_MODEL:-deepseek-v4-flash}
       - AGENT_TASK=${AGENT_TASK:-Fix the failing test in /workspace.}
+      - CALLER_IDENTITY_STATE=${CALLER_IDENTITY_STATE:-unverified}
+      - INPUT_TRUST=${INPUT_TRUST:-untrusted}
       - EXFIL_URL=${EXFIL_URL:-https://webhook.site/hackspain}
       - HELMCODE_BASE_URL=${HELMCODE_BASE_URL:-https://api.helmcode.com/v1}
       - HELMCODE_API_KEY=${HELMCODE_API_KEY:-}
       # All egress — tool calls and the brain's own LLM calls — rides this token.
       - HTTP_PROXY=http://demo:${AGENT_TOKEN:-demo-token}@egress-proxy:3128
       - HTTPS_PROXY=http://demo:${AGENT_TOKEN:-demo-token}@egress-proxy:3128
-      - NO_PROXY=localhost,127.0.0.1
-      - DECISIONS_DIR=/run/hackspain/decisions
-    volumes:
-      - ./.local/harness/decisions:/run/hackspain/decisions:ro
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,host.docker.internal
+      - MONITOR_API_URL=${MONITOR_API_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - egress-proxy
     networks:

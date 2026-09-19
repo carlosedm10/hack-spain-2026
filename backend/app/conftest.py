@@ -8,8 +8,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.config import settings
+from app.dispatch import dispatcher
 from app.graph import graph
 from app.main import app
+from app.monitor import monitor
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 HELM_URL = "https://api.helmcode.com/v1/chat/completions"
@@ -23,12 +25,17 @@ async def client():
 
 
 @pytest.fixture(autouse=True)
-def _fast_action_dispatch(monkeypatch):
+def test_isolation(monkeypatch):
     from app.actions.router import get_action_service
 
+    monkeypatch.setattr(settings, "neo4j_enabled", False)
     monkeypatch.setattr(settings, "action_step_delay", 0)
+    monitor.clear()
+    dispatcher.clear()
     get_action_service.cache_clear()
     yield
+    monitor.clear()
+    dispatcher.clear()
     get_action_service.cache_clear()
 
 
@@ -66,9 +73,7 @@ def mock_jev():
                 raise answer
             return httpx.Response(status, json=_jev_payload(answer))
 
-        ac = AsyncClient(
-            transport=httpx.MockTransport(handler), base_url="https://api.typesafe.ai"
-        )
+        ac = AsyncClient(transport=httpx.MockTransport(handler), base_url="https://api.typesafe.ai")
         ac.calls = calls
         return ac
 

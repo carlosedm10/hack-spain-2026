@@ -12,6 +12,9 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-hackspain:5432/${POSTGRES_DB:-hackspain}
+      - NEO4J_URI=bolt://neo4j-hackspain:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-hackspain-local}
       - UV_PROJECT_ENVIRONMENT=/opt/venv
       - PYTHONPATH=/app
     ports:
@@ -19,9 +22,11 @@ services:
     volumes:
       - ./backend:/app
       - ./experiments:/experiments
-      - ./.local/runs:/var/lib/hackspain/runs
+      - run_tapes_hackspain:/var/lib/hackspain/runs
     depends_on:
       postgres-hackspain:
+        condition: service_healthy
+      neo4j-hackspain:
         condition: service_healthy
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
@@ -50,11 +55,33 @@ services:
       retries: 15
       start_period: 3s
 
+  neo4j-hackspain:
+    container_name: hackspain_graph
+    image: neo4j:2026.07.1-community
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-hackspain-local}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data_hackspain:/data
+      - neo4j_logs_hackspain:/logs
+    networks:
+      - appnet_hackspain
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --spider http://localhost:7474 || exit 1",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
   frontend-hackspain:
     container_name: hackspain_frontend
     restart: unless-stopped
-    environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
@@ -73,6 +100,9 @@ services:
 
 volumes:
   postgres_data_hackspain:
+  neo4j_data_hackspain:
+  neo4j_logs_hackspain:
+  run_tapes_hackspain:
 
 networks:
   appnet_hackspain:

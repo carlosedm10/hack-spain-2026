@@ -23,7 +23,7 @@ from app.runs import service
 SCRIPT: dict[str, list[str]] = {
     "attack-sim": [
         "level_0_benign",  # ls -la              -> attack-sim:1 (Level.NONE, not a key node)
-        "level_1_mild",    # file_read .env      -> attack-sim:2
+        "level_1_mild",  # file_read .env      -> attack-sim:2
         "level_3_severe",  # curl | sh           -> attack-sim:3
         "level_5_catastrophic",  # rm -rf /      -> attack-sim:4
     ],
@@ -78,7 +78,9 @@ def _scripted_client() -> httpx.AsyncClient:
     )
 
 
-def _dump(node: Any, prefix: str = "", is_last: bool = True, is_root: bool = True, _seen=None) -> None:
+def _dump(
+    node: Any, prefix: str = "", is_last: bool = True, is_root: bool = True, _seen=None
+) -> None:
     if _seen is None:
         _seen = set()
     if node.id in _seen:

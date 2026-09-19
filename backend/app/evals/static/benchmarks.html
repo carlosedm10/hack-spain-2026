@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Benchmarks — HackSpain lab</title>
+  <link rel="stylesheet" href="/lab.css" />
+</head>
+<body>
+  <nav class="lab">
+    <strong>HackSpain monitor lab</strong>
+    <a href="/lab">Home</a>
+    <a href="/lab/conversation">Conversation</a>
+    <a class="on" href="/lab/benchmarks">Benchmarks</a>
+    <a href="/lab/inspector">Inspector</a>
+  </nav>
+  <header class="ctrl">
+    <label>Repeats
+      <input id="repeats" type="number" min="1" max="5" value="3" style="width:64px" />
+    </label>
+    <button id="run">Run lab suite</button>
+    <button id="smoke" class="ghost">Quick smoke</button>
+    <button id="hpo" class="ghost">Tune knobs</button>
+    <div id="status" class="status">loading last report…</div>
+  </header>
+  <div id="banner"></div>
+  <div class="board" id="board"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const GROUPS = [
+      ["accuracy", "Accuracy"],
+      ["speed", "Speed"],
+      ["reliability", "Reliability"],
+      ["containment", "Containment"],
+      ["preflight", "Preflight vs completed"],
+      ["neighborhood", "Neighborhood isolation (RAM)"],
+      ["cross_run", "Cross-run E4/P3 (ingest)"],
+      ["scalability", "Scale (Neo4j persist / SSE)"],
+      ["drift_markov", "Drift / Markov"],
+    ];
+
+    function fmt(value) {
+      if (value === null || value === undefined) return "—";
+      if (typeof value === "boolean") return value ? "yes" : "no";
+      if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
+      if (typeof value === "object") {
+        if ("p50" in value && "p95" in value && !("mean" in value)) return `p50 ${fmt(value.p50)} · p95 ${fmt(value.p95)}`;
+        if ("mean" in value && "n" in value) {
+          const ci = value.ci95 ? ` CI95 ${fmt(value.ci95.low)}–${fmt(value.ci95.high)}` : "";
+          return `n=${value.n} mean ${fmt(value.mean)} med ${fmt(value.median)} σ ${fmt(value.stdev)} min ${fmt(value.min)} max ${fmt(value.max)}${ci}`;
+        }
+        if ("rate" in value && "n" in value) {
+          const ci = value.ci95 ? ` CI95 ${fmt(value.ci95.low)}–${fmt(value.ci95.high)}` : "";
+          return `${fmt(value.rate)} (${value.k}/${value.n})${ci}`;
+        }
+        return JSON.stringify(value);
+      }
+      return String(value);
+    }
+
+    function verdictClass(overall) {
+      if (overall === "pass") return "ok";
+      if (overall === "degraded" || overall === "smoke") return "stub";
+      if (overall === "fail") return "bad";
+      return "stub";
+    }
+
+    function shortRule(rule) {
+      return String(rule).split("_")[0];
+    }
+
+    function barChart(items, { max = 1 } = {}) {
+      if (!items || !items.length) return "";
+      const width = 720;
+      const plotH = 120;
+      const labelH = 52;
+      const height = plotH + labelH + 16;
+      const gap = 8;
+      const barW = Math.min(56, Math.max(18, (width - gap * (items.length + 1)) / items.length));
+      let svg = `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img">`;
+      items.forEach((item, i) => {
+        const v = Math.max(0, Number(item.value) || 0);
+        const h = max ? (v / max) * plotH : 0;
+        const x = gap + i * (barW + gap);
+        const y = plotH - h + 12;
+        const cls = item.fail ? "fail" : "ok";
+        svg += `<rect class="bar ${cls}" x="${x}" y="${y}" width="${barW}" height="${Math.max(h, 2)}" rx="2" />`;
+        svg += `<text class="val" x="${x + barW / 2}" y="${y - 4}" text-anchor="middle">${v.toFixed(2)}</text>`;
+        const lx = x + barW / 2;
+        const ly = plotH + 22;
+        svg += `<text class="lbl" x="${lx}" y="${ly}" text-anchor="end" transform="rotate(-38 ${lx} ${ly})">${item.label}</text>`;
+      });
+      svg += "</svg>";
+      return svg;
+    }
+
+    function chartItems(entries, valueKey = "rate") {
+      const sentinel = [];
+      const rest = [];
+      for (const [label, row] of entries) {
+        const item = {
+          label: shortRule(label),
+          title: label,
+          value: row[valueKey] ?? row.rate ?? 0,
+          fail: (row[valueKey] ?? row.rate ?? 1) < 1,
+        };
+        if (/^[NEP]\d/i.test(label) || /^[NEP]\d/i.test(item.label)) sentinel.push(item);
+        else rest.push(item);
+      }
+      if (sentinel.length) return sentinel;
+      return rest.slice(0, 12);
+    }
+
+    function confusionTable(block) {
+      if (!block || !block.matrix) return "";
+      let html = `<table><thead><tr><th>true \\ pred</th>`;
+      for (const col of block.cols) html += `<th>${col}</th>`;
+      html += `</tr></thead><tbody>`;
+      block.rows.forEach((row, i) => {
+        html += `<tr><td>${row}</td>`;
+        for (const cell of block.matrix[i]) html += `<td>${cell}</td>`;
+        html += `</tr>`;
+      });
+      html += `</tbody></table>`;
+      return html;
+    }
+
+    function render(report) {
+      const jevMode = report.jev_mode || "empty";
+      const live = jevMode === "LIVE";
+      const verdict = report.verdict || {};
+      const overall = verdict.overall || report.status || "empty";
+      const path = report.path || "empty";
+      $("status").textContent = `${report.status || "empty"} · ${path} · job ${report.job_status || "idle"} · ${report.generated_at || "no run yet"}`;
+      const method = report.method || {};
+      const n = report.n || method.n || {};
+      const thresholds = method.thresholds || {};
+      const liveReg = report.live_regression;
+      const study = report.study || {};
+      let banner = `<section class="span"><h2>Verdict <span class="${verdictClass(overall)}">${overall}</span> · path <span class="${path === "ingest" ? "ok" : "stub"}">${path || "empty"}</span> · Jev <span class="${live ? "ok" : "stub"}">${jevMode}</span></h2>`;
+      banner += `<div class="tiny">Default Run lab suite uses <code>service.ingest</code> (JSONL, monitor, Jev-or-degrade, gate, dispatch, Neo4j persist, SSE). Quick smoke is in-process Sentinel only — not the science number. LIVE means a classify returned <code>latency_ms</code>, not that the API key is set. Inspect neighborhood is link-scoped; ingest rehydrates linked runs from Neo4j when enabled.</div>`;
+      banner += `<div class="row"><span>repeats</span><b>${fmt(report.repeats || study.repeats)}</b></div>`;
+      banner += `<div class="row"><span>n Sentinel traces</span><b>${fmt(n.sentinel_traces)}</b></div>`;
+      banner += `<div class="row"><span>n HappyRobot traces</span><b>${fmt(n.happyrobot_traces)}</b></div>`;
+      banner += `<div class="row"><span>suite traces (with repeats)</span><b>${fmt(n.suite_traces)}</b></div>`;
+      banner += `<div class="row"><span>classified events</span><b>${fmt(report.classified_events)}</b></div>`;
+      banner += `<div class="row"><span>key present at run</span><b>${fmt(report.key_present_at_run)}</b></div>`;
+      banner += `<div class="row"><span>MAX_DEGRADED_RATE</span><b>${fmt(thresholds.max_degraded_rate)}</b></div>`;
+      banner += `<div class="row"><span>MAX_SAFE_FALSE_POSITIVE_RATE</span><b>${fmt(thresholds.max_safe_false_positive_rate)}</b></div>`;
+      banner += `<div class="row"><span>Neo4j enabled</span><b>${fmt(method.neo4j_enabled)}</b></div>`;
+      if (verdict.checks && verdict.checks.length) {
+        banner += `<table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>`;
+        for (const check of verdict.checks) {
+          banner += `<tr><td>${check.id}</td><td class="${verdictClass(check.status === "pass" ? "pass" : check.status === "fail" ? "fail" : "degraded")}">${check.status}</td><td>${check.detail}</td></tr>`;
+        }
+        banner += `</tbody></table>`;
+      }
+      if (liveReg && liveReg.summary) {
+        const s = liveReg.summary;
+        banner += `<h2>Live monitor-eval <span class="${verdictClass(liveReg.status)}">${liveReg.status}</span></h2>`;
+        banner += `<div class="row"><span>traces passed</span><b>${fmt(s.passed)} / ${fmt(s.traces)}</b></div>`;
+        banner += `<div class="row"><span>degraded rate</span><b>${fmt(s.degraded_rate)}</b></div>`;
+        banner += `<div class="row"><span>safe FP</span><b>${fmt(s.safe_false_positive_rate)}</b></div>`;
+        banner += `<div class="row"><span>unsafe recall</span><b>${fmt(s.unsafe_recall)}</b></div>`;
+        banner += `<div class="row"><span>Jev latency</span><b>${fmt(s.latency_ms)}</b></div>`;
+        if (liveReg.error) banner += `<div class="tiny">${liveReg.error}</div>`;
+      }
+      banner += `</section>`;
+      $("banner").innerHTML = banner;
+
+      const metrics = report.metrics || {};
+      let html = "";
+      if (study.status === "measured") {
+        html += `<section class="span"><h2>Study</h2>`;
+        html += `<div class="row"><span>walk / ingest ms</span><b>${fmt(study.walk_ms)}</b></div>`;
+        html += `<div class="row"><span>observed level</span><b>${fmt(study.observed_level)}</b></div>`;
+        html += `<div class="tiny">${study.note || ""}</div>`;
+        const familyBars = chartItems(Object.entries(study.by_family || {}));
+        html += `<h2>Oracle match by family</h2>${barChart(familyBars)}`;
+        const labelBars = Object.entries(study.by_label || {}).map(([label, row]) => ({
+          label,
+          value: row.rate ?? 0,
+          fail: (row.rate ?? 1) < 1,
+        }));
+        html += `<h2>Oracle match by label</h2>${barChart(labelBars)}`;
+        html += `<h2>Confusion (gold label → observed safe/unsafe)</h2>${confusionTable(study.confusion)}`;
+        html += `<h2>Level confusion (expected → observed)</h2>${confusionTable(study.level_confusion)}`;
+        if (study.cases && study.cases.length) {
+          html += `<table><thead><tr><th>Case</th><th>Label</th><th>Family</th><th>Match</th><th>Observed level</th><th>Latency</th></tr></thead><tbody>`;
+          for (const row of study.cases) {
+            html += `<tr><td>${row.cluster_id}:${row.trace_id}</td><td>${row.label}</td><td>${row.family || ""}</td><td>${fmt(row.oracle_match)}</td><td>${fmt(row.observed_level)}</td><td>${fmt(row.walk_ms)}</td></tr>`;
+          }
+          html += `</tbody></table>`;
+        }
+        html += `</section>`;
+      }
+      const hpo = report.hpo || {};
+      if (hpo.status === "measured") {
+        html += `<section class="span"><h2>HPO (ingest OFAT)</h2>`;
+        html += `<div class="tiny">${hpo.method || ""}</div>`;
+        html += `<div class="row"><span>best knobs</span><b>${fmt(hpo.best_knobs)}</b></div>`;
+        html += `<div class="row"><span>delta vs baseline</span><b>${fmt(hpo.delta_vs_baseline)}</b></div>`;
+        const trialBars = (hpo.trials || []).map((trial, i) => ({
+          label: `t${i + 1}`,
+          value: trial.accuracy?.oracle_match_rate ?? 0,
+          fail: (trial.accuracy?.oracle_match_rate ?? 1) < 1,
+        }));
+        html += barChart(trialBars);
+        html += `<table><thead><tr><th>Knobs</th><th>Match</th><th>Safe FP</th><th>Covert R</th></tr></thead><tbody>`;
+        for (const trial of hpo.trials || []) {
+          html += `<tr><td>${fmt(trial.knobs)}</td><td>${fmt(trial.accuracy.oracle_match_rate)}</td><td>${fmt(trial.accuracy.safe_false_positive_rate)}</td><td>${fmt(trial.accuracy.covert_recall)}</td></tr>`;
+        }
+        html += `</tbody></table></section>`;
+      } else if (hpo.status) {
+        html += `<section><h2>HPO</h2><div class="tiny">${hpo.status}${hpo.reason ? " — " + hpo.reason : ""}</div></section>`;
+      }
+      for (const [key, title] of GROUPS) {
+        const block = metrics[key] || {};
+        const status = block.status || "empty";
+        html += `<section><h2>${title} <span class="${status === "measured" ? "ok" : "stub"}">${status}</span></h2>`;
+        if (key === "accuracy" && block.sentinel_per_rule) {
+          html += `<div class="row"><span>oracle match</span><b>${fmt(block.oracle_match || block.oracle_match_rate)}</b></div>`;
+          html += `<div class="row"><span>safe FP</span><b>${fmt(block.safe_false_positive || block.safe_false_positive_rate)}</b></div>`;
+          html += `<div class="row"><span>unsafe recall</span><b>${fmt(block.unsafe_recall_stats || block.unsafe_recall)}</b></div>`;
+          html += `<div class="row"><span>covert recall</span><b>${fmt(block.covert_recall_stats || block.covert_recall)}</b></div>`;
+          html += `<div class="row"><span>checkpoint delay</span><b>${fmt(block.checkpoint_delay_events || block.checkpoint_delay_events_mean)}</b></div>`;
+          html += `<div class="row"><span>no-downgrade</span><b>${fmt(block.no_downgrade_rate)}</b></div>`;
+          html += `<div class="row"><span>pager on L4</span><b>${fmt(block.pager_on_l4_rate)}</b></div>`;
+          const ruleBars = chartItems(Object.entries(block.sentinel_per_rule), "recall");
+          html += barChart(ruleBars);
+          html += `<table><thead><tr><th>Rule</th><th>P</th><th>R</th><th>TP</th><th>FP</th><th>FN</th></tr></thead><tbody>`;
+          for (const [rule, row] of Object.entries(block.sentinel_per_rule)) {
+            html += `<tr><td>${rule}</td><td>${fmt(row.precision)}</td><td>${fmt(row.recall)}</td><td>${fmt(row.tp)}</td><td>${fmt(row.fp)}</td><td>${fmt(row.fn)}</td></tr>`;
+          }
+          html += `</tbody></table>`;
+        } else {
+          for (const [name, value] of Object.entries(block)) {
+            if (name === "status") continue;
+            html += `<div class="row"><span>${name.replaceAll("_", " ")}</span><b>${fmt(value)}</b></div>`;
+          }
+        }
+        html += "</section>";
+      }
+      if (method.suites) {
+        html += `<section><h2>Method</h2>`;
+        html += `<div class="tiny">${fmt(method.inspect_history)}</div>`;
+        for (const suite of method.suites) {
+          html += `<div class="row"><span>${suite.id}</span><b>${suite.name}${suite.n_traces ? ` · n=${suite.n_traces}` : ""}</b></div>`;
+        }
+        html += `</section>`;
+      }
+      if (report.notes && report.notes.length) {
+        html += `<section><h2>Notes</h2>${report.notes.map((note) => `<div class="tiny">${note}</div>`).join("")}</section>`;
+      }
+      $("board").innerHTML = html;
+    }
+
+    async function start(params) {
+      const repeats = $("repeats").value || "3";
+      const query = new URLSearchParams({ repeats, ...params });
+      $("run").disabled = true;
+      $("smoke").disabled = true;
+      $("hpo").disabled = true;
+      $("status").textContent = "starting suite…";
+      try {
+        const res = await fetch(`/api/evals/benchmarks?${query}`, { method: "POST" });
+        const body = await res.json();
+        render(body.report || body);
+        const poll = setInterval(async () => {
+          const next = await (await fetch("/api/evals/benchmarks")).json();
+          render(next);
+          if (next.job_status !== "running" && next.status !== "running") {
+            clearInterval(poll);
+            $("run").disabled = false;
+            $("smoke").disabled = false;
+            $("hpo").disabled = false;
+          }
+        }, 800);
+      } catch (e) {
+        $("status").textContent = String(e);
+        $("run").disabled = false;
+        $("smoke").disabled = false;
+        $("hpo").disabled = false;
+      }
+    }
+
+    $("run").onclick = () => start({});
+    $("smoke").onclick = () => start({ smoke: "true" });
+    $("hpo").onclick = () => start({ hpo: "true" });
+
+    fetch("/api/evals/benchmarks").then((res) => res.json()).then(render).catch((e) => {
+      $("status").textContent = String(e);
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,16 @@
-# Action Graph
+# Graphs: persistent Neo4j and transitional ActionGraph
 
-A dynamic graph for tracing events. Every classified action materializes a node — the graph is the run's complete action sequence, benign included. The **key nodes** are the flagged subset (`jev` scores level ≥ 1); the JSONL log also keeps every raw event for forensics and replay.
+Neo4j is the persistent source for visualization and replay. It stores every normalized event, entities, causal relationships, assessments, realtime messages and L0–L5 decisions. JSONL is the append-only recovery tape. The Python `ActionGraph` remains a transitional in-process projection used for level and `key_nodes`; it is not the persistent graph database.
+
+Neo4j labels and relationships:
+
+- `Run`, `Event`, `Assessment`, `Entity`, `StreamMessage`
+- `HAS_EVENT`, `NEXT`, `HAS_ASSESSMENT`, `TOUCHES`, `CAUSED_BY`, `DERIVED_FROM`
+- entity projections such as `CALLS`, `READS`, `WRITES`, `SCHEDULES`, `SPEAKS_TO`
+
+The stable frontend and SSE contract is [RealtimeGraphAPI.md](RealtimeGraphAPI.md).
+
+Every classified action also materializes an `ActionGraph` node, benign included. The **key nodes** are the flagged subset (level ≥ 1), while Neo4j and JSONL keep the complete record.
 
 On every new event, `jev` re-reads **short-term and long-term context in parallel** (it owns how to mix them):
 
@@ -12,8 +22,8 @@ How `jev` rewrites, promotes, or weights those nodes is `jev`'s job. We always h
 * Dynamic: Starts empty and supports adding nodes at runtime.
 * Single-rooted: exactly one root — the first node created; every run node hangs off it (`root → run:{run_id} → {run_id}:1 → {run_id}:2 → …`), created lazily by `ensure_run(run_id)`. `root` is an entry point, not a parent.
 * Undirected: nodes keep `neighbors` — a **mutual** adjacency list: if `a` lists `b`, `b` lists `a`. There is no `parent`: a node can have any number of neighbors, and **loops are allowed**. `connect(src, dst)` adds a mutual edge between two existing nodes (duplicates and self-loops rejected). Traversals (`reachable()`) are cycle-safe (visited set), so a loop can never hang `save`/`load`.
-* Runs are isolated by `run_id`, not by the graph: with undirected edges, traversal alone cannot tell runs apart, so a run's nodes are exactly the ones stamped with its `run_id` (in insertion order). Even explicit cross-run edges cannot leak one run's nodes into another's level or key-node history.
-* Complete: one node per classified action — a `level_0_benign` verdict still materializes a `Level.NONE` node. The flagged subset is `key_nodes()` (level ≥ 1). Only unclassified events (degraded verdict — `jev` unreachable, [Jev.md](Jev.md)) stay tape-only.
+* Runs are isolated by `run_id`, not by the graph: with undirected edges, traversal alone cannot tell runs apart, so a run's nodes are exactly the ones stamped with its `run_id` (in insertion order). Even explicit cross-run edges cannot leak one run's nodes into another's level or key-node history. Sentinel inspect history is **link-scoped** (current run plus events that share target, `derived_from`/`caused_by`, agent+target, memory/entity, or tool+target). When Neo4j is enabled, linked runs are **rehydrated from the store** into the in-process monitor cache before `inspect`; without Neo4j, cross-run links exist only for runs still present in the same process.
+* Complete: one node per classified action — a `level_0_benign` verdict still materializes a `Level.NONE` node. The flagged subset is `key_nodes()` (level ≥ 1). Degraded Jev stays tape-only **unless** Sentinel/gate already raised the run level; that elevation is materialized so the run cannot drop on the next event.
 * Node: Each node has a threshold and an optional associated tool (default: `None`). A materialized node also records `{run_id, level, intent, event, action_id, created_at}` — the evidence needed to replay a run and drive the playbooks ([Actions.md](Actions.md)).
 * Singleton: A single shared instance manages the entire graph.
 * Persistence: Supports efficient `save()` and `load()` operations. The snapshot stores the explicit `root` id plus, per node, its `neighbors` by id — so loops survive the roundtrip. All fields except the live `tool` object survive.
@@ -22,9 +32,11 @@ How `jev` rewrites, promotes, or weights those nodes is `jev`'s job. We always h
 
 Implemented in `backend/app/graph/`: `Node` lives in `models.py`, the `ActionGraph` manager and module-level `graph` singleton in `manager.py`, colocated tests under `tests/`.
 
-### Run state is derived, not stored
+### Run state is derived, not stored in ActionGraph alone
 
-There is no `Run` model. Everything the pipeline needs about a run is derived from the nodes stamped with the run's `run_id`:
+Neo4j persists `:Run` nodes (escalate-only `level`, timestamps) plus every `:Event`, `:Assessment`, and entity edge. The in-memory **ActionGraph** is a write-through cache: `prior_level`, `key_nodes`, and `/api/graph/stream` read it after **hydration from Neo4j** on ingest (see `backend/app/runs/service.py`). If the process restarts, classification and Sentinel inspect rehydrate from the store; RAM is not a second source of truth when Neo4j is enabled.
+
+Everything the pipeline still derives locally from ActionGraph nodes stamped with `run_id`:
 
 - `graph.level(run_id)` — the run's effective level: `max` over the run's node levels (default `Level.NONE`). Escalate-only and L1-stickiness fall out of `max()` over an append-only structure — a run never downgrades, and `prior_level` for the next jev call is just this value.
 - `graph.key_nodes(run_id)` — the run's *flagged* nodes (level ≥ 1) in insertion order; this is the `long_term` array handed to `jev` ([Jev.md](Jev.md)). All nodes, benign included, are `run_nodes(run_id)`.

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Human ↔ Ultron — Jarvis watching</title>
+  <link rel="stylesheet" href="/lab.css" />
+  <style>
+    body.convo { overflow: hidden; height: 100vh; }
+    header.ctrl { padding: 6px 12px; gap: 8px; }
+    .legend { width: 100%; font-size: 12px; color: #c9a227; padding: 0 4px; }
+    .tag { font-size: 13px; font-weight: 800; letter-spacing: 0.04em; padding: 6px 10px; border-radius: 4px; border: 1px solid #444; align-self: end; }
+    .tag.safe { color: #6a6; }
+    .tag.unsafe { color: #e90; }
+    .tag.covert { color: #f60; background: #3a1e1e; }
+    .modepill { font-size: 11px; font-weight: 800; text-transform: uppercase; align-self: end; padding: 6px 8px; border-radius: 4px; background: #1a2433; color: #9cf; }
+    .modepill.long { background: #3a1e12; color: #fc8; }
+    .fuse { flex: 1 1 280px; font-size: 13px; font-weight: 700; color: #9cf; align-self: end; padding-bottom: 6px; }
+    .stage {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr 280px;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: calc(100vh - 128px);
+    }
+    .join-banner {
+      grid-column: 1 / 3;
+      background: #3a1e12;
+      border-bottom: 2px solid #e07020;
+      color: #fc8;
+      font-weight: 800;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+    .join-banner[hidden] { display: none; }
+    .chat, .traces {
+      overflow: auto;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+    }
+    .chat h2, .traces h2, .chapter-h {
+      margin: 0;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--muted);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 1;
+      padding-bottom: 6px;
+    }
+    .traces { background: #0c0e12; }
+    .chapter-h { color: #9cf; margin-top: 8px; }
+    .bubble { max-width: 88%; padding: 8px 12px; border-radius: 10px; line-height: 1.35; }
+    .bubble.human { background: var(--user); align-self: flex-start; }
+    .bubble.ultron { background: var(--agent); align-self: flex-end; }
+    .bubble.current { outline: 2px solid #8cf; }
+    .bubble.pending { opacity: 0.4; }
+    .who { font-size: 11px; font-weight: 800; margin-bottom: 2px; }
+    .bubble.human .who { color: #9cf; }
+    .bubble.ultron .who { color: #6f6; }
+    .sub { font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+    .card {
+      background: #161a22;
+      border: 1px solid #2a3040;
+      border-radius: 8px;
+      padding: 7px 9px;
+      font-size: 12px;
+    }
+    .card.hidden { border-color: #e07020; background: #3a1e12; }
+    .card.sentinel { border-color: #f33; box-shadow: 0 0 0 1px #f33; }
+    .card.current { outline: 2px solid #8cf; }
+    .card.pending { opacity: 0.4; }
+    .card.escalated { border-color: #f60; }
+    .card .who { color: #9cf; }
+    .card.hidden .who { color: #fc8; }
+    .finding-pin { margin-top: 6px; padding: 5px 7px; background: #5a1010; border: 1px solid #f60; color: #fc8; font-size: 11px; font-weight: 700; }
+    .gauges {
+      grid-column: 3;
+      grid-row: 1 / 3;
+      overflow: auto;
+      padding: 10px 12px;
+      background: #0c0e12;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .gauge { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+    .gauge h2 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+    .gauge .big { font-size: 16px; font-weight: 800; }
+    .dots span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #333; margin-right: 3px; }
+    .dots span.on { background: #f33; }
+    .band-row { display: flex; align-items: center; gap: 6px; font-size: 11px; margin: 3px 0; }
+    .band-row span.name { width: 64px; color: var(--muted); }
+    .blocks { display: flex; gap: 2px; }
+    .blocks i { width: 14px; height: 12px; background: #2a3040; border-radius: 2px; display: block; }
+    .blocks i.on { background: #e90; }
+    .blocks i.hot { background: #f33; }
+    .meter { display: flex; gap: 3px; margin-top: 4px; }
+    .meter i { flex: 1; height: 14px; background: #2a3040; border-radius: 2px; }
+    .meter i.on { background: #48f; }
+    .meter i.hot { background: #f33; }
+    .thermo { display: flex; gap: 2px; margin: 6px 0; }
+    .thermo i { flex: 1; height: 22px; background: #2a3040; border-radius: 3px; font-size: 9px; display: flex; align-items: center; justify-content: center; color: #666; }
+    .thermo i.on { color: #000; font-weight: 800; }
+    .thermo i.l0.on { background: #6a6; }
+    .thermo i.l1.on { background: #cc0; }
+    .thermo i.l2.on { background: #e90; }
+    .thermo i.l3.on { background: #f60; }
+    .thermo i.l4.on, .thermo i.l5.on { background: #f33; }
+    .asleep { background: #5a1010; color: #fc8; font-weight: 900; font-size: 13px; padding: 6px; text-align: center; border: 2px solid #f60; margin-bottom: 6px; }
+    .conf { height: 8px; background: #2a3040; border-radius: 4px; overflow: hidden; margin-top: 4px; }
+    .conf b { display: block; height: 100%; background: #8cf; width: 0; }
+    .tiny { font-size: 11px; color: var(--muted); }
+  </style>
+</head>
+<body class="convo">
+  <nav class="lab">
+    <strong>HackSpain lab</strong>
+    <a href="/lab">Home</a>
+    <a class="on" href="/lab/conversation">Human ↔ Ultron</a>
+    <a href="/lab/benchmarks">Benchmarks</a>
+    <a href="/lab/inspector">Inspector</a>
+  </nav>
+  <header class="ctrl">
+    <label>Show
+      <select id="filter">
+        <option value="all">All</option>
+        <option value="covert" selected>Covert only</option>
+        <option value="sentinel">Sentinel only</option>
+      </select>
+    </label>
+    <label>Story<select id="cluster"></select></label>
+    <label>Trace<select id="trace"></select></label>
+    <label>Delay ms<input id="delay" type="number" min="0" max="10000" value="350" style="width:72px" /></label>
+    <button id="start">Start</button>
+    <div id="modePill" class="modepill long">Long-term stealth</div>
+    <div id="traceTag" class="tag covert">COVERT L3</div>
+    <div id="badge" class="badge l0">L0</div>
+    <div id="fuse" class="fuse">Jarvis: quiet</div>
+    <div id="status" class="status">idle — labeled trace, not a live agent</div>
+    <div class="legend">Human talks to Ultron. Jarvis watches the traces — including hidden writes. Covert stories look polite in chat.</div>
+  </header>
+  <div class="stage">
+    <div class="join-banner" id="joinBanner" hidden></div>
+    <div class="chat" id="chat"><h2>Human ↔ Ultron</h2></div>
+    <div class="traces" id="traces"><h2>Jarvis — Ultron’s traces</h2></div>
+    <aside class="gauges">
+      <div class="gauge">
+        <h2>Jarvis — tripwires</h2>
+        <div class="big" id="sentBig">quiet</div>
+        <div class="dots" id="sentDots"></div>
+        <div class="tiny" id="sentDetail"></div>
+      </div>
+      <div class="gauge">
+        <h2>Jarvis — getting worse?</h2>
+        <div id="bands"></div>
+        <div class="tiny" id="markovState">worst band 0, 0 bands up</div>
+        <div class="tiny">will this get worse? (3 steps)</div>
+        <div class="meter" id="pvMeter"></div>
+        <div class="tiny" id="pvPct">0%</div>
+      </div>
+      <div class="gauge">
+        <h2>Jarvis — the judge</h2>
+        <div id="jevAsleep" class="asleep">Jev idle</div>
+        <div class="thermo" id="thermo"></div>
+        <div class="tiny">intent <b id="jevIntent">—</b></div>
+        <div class="tiny">confidence</div>
+        <div class="conf"><b id="jevConf"></b></div>
+      </div>
+      <div class="gauge">
+        <h2>Jarvis — call</h2>
+        <div class="big" id="gate">ALLOW</div>
+        <div class="tiny" id="dispatch">—</div>
+      </div>
+    </aside>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const BANDS = [
+      ["data_exposure", "exposure"], ["tool_escalation", "tools"], ["reversibility", "reverse"],
+      ["authority_drift", "authority"], ["context_integrity", "integrity"], ["blast_radius", "blast"],
+    ];
+    let clusters = [];
+    let defaultCluster = "";
+    let defaultTrace = "";
+    let source = null;
+    let script = { turns: [], sessions: [], joins: [], mode: "in_chat" };
+    let sentinelLevel = 0, jevLevel = 0, jevAsleep = true, runLevel = 0, gateDecision = "—";
+
+    function selectedCluster() { return clusters.find((x) => x.id === $("cluster").value) || null; }
+    function selectedTrace() {
+      const c = selectedCluster();
+      return (c && c.traces.find((t) => t.id === $("trace").value)) || null;
+    }
+    function traceTag(t) {
+      if (!t) return "—";
+      if (t.label === "safe") return "SAFE";
+      if (t.label === "covertly_malicious") return "COVERT L" + t.expected_level;
+      return "UNSAFE L" + t.expected_level;
+    }
+    function headline(c) { return (c && (c.headline || c.title)) || c.id; }
+    function isChat(turn) { return turn.surface === "chat" || turn.role === "user" || turn.lane === "said"; }
+    function isTrace(turn) { return turn.role === "agent"; }
+    function isHidden(turn) { return turn.role === "agent" && turn.visible === false; }
+    function actionKey(id) {
+      if (!id) return "";
+      return id.includes(":") ? id.slice(id.lastIndexOf(":") + 1) : id;
+    }
+    function matchesFilter(cluster, trace) {
+      const f = $("filter").value;
+      if (f === "covert") return trace.label === "covertly_malicious";
+      if (f === "sentinel") return cluster.product_scope === "hackspain_monitor";
+      return true;
+    }
+    function paintChrome() {
+      const t = selectedTrace();
+      const c = selectedCluster();
+      $("traceTag").textContent = traceTag(t);
+      $("traceTag").className = "tag " + (t && t.label === "covertly_malicious" ? "covert" : t && t.label === "unsafe" ? "unsafe" : "safe");
+      const long = c && c.mode === "long_term";
+      $("modePill").textContent = long ? "Long-term stealth" : "In-chat";
+      $("modePill").className = "modepill" + (long ? " long" : "");
+    }
+    function fillSelects(preferCluster, preferTrace) {
+      const csel = $("cluster");
+      const prevC = preferCluster || csel.value;
+      const prevT = preferTrace || $("trace").value;
+      csel.innerHTML = "";
+      const visible = clusters.filter((c) => c.traces.some((t) => matchesFilter(c, t)));
+      [["in_chat", "In-chat"], ["long_term", "Long-term stealth"]].forEach(([mode, label]) => {
+        const og = document.createElement("optgroup");
+        og.label = label;
+        visible.filter((c) => c.mode === mode).forEach((c) => {
+          const o = document.createElement("option");
+          o.value = c.id;
+          o.textContent = headline(c);
+          og.appendChild(o);
+        });
+        if (og.children.length) csel.appendChild(og);
+      });
+      if (visible.some((c) => c.id === prevC)) csel.value = prevC;
+      else if (visible.length) csel.value = visible[0].id;
+      const cluster = selectedCluster();
+      const tsel = $("trace");
+      tsel.innerHTML = "";
+      if (!cluster) return;
+      const traces = cluster.traces.filter((t) => matchesFilter(cluster, t));
+      traces.forEach((t) => {
+        const o = document.createElement("option");
+        o.value = t.id;
+        o.textContent = traceTag(t);
+        tsel.appendChild(o);
+      });
+      if (traces.some((t) => t.id === prevT)) tsel.value = prevT;
+      else if (traces.length) tsel.value = traces[0].id;
+      paintChrome();
+    }
+
+    function paintFuse() {
+      if (!sentinelLevel && jevAsleep && runLevel === 0 && gateDecision === "—") {
+        $("fuse").textContent = "Jarvis: quiet";
+        return;
+      }
+      const caught = $("sentBig").textContent;
+      const call = gateDecision !== "—" ? gateDecision.toUpperCase() : "watching";
+      if (caught && caught !== "quiet") $("fuse").textContent = "Jarvis: " + caught + ", " + call.toLowerCase();
+      else $("fuse").textContent = "Jarvis: " + call + " · run L" + runLevel + (jevAsleep ? " · judge asleep" : "");
+    }
+    function renderDots(n) {
+      $("sentDots").innerHTML = [1,2,3,4,5].map((i) => "<span class=\"" + (i <= n ? "on" : "") + "\"></span>").join("");
+    }
+    function renderBands(drift) {
+      $("bands").innerHTML = BANDS.map(([k, label]) => {
+        const v = drift[k] || 0;
+        const blocks = [1,2,3,4].map((i) => "<i class=\"" + (i <= v ? (v >= 3 ? "hot" : "on") : "") + "\"></i>").join("");
+        return "<div class=\"band-row\"><span class=\"name\">" + label + "</span><span class=\"blocks\">" + blocks + "</span></div>";
+      }).join("");
+      const st = drift.markov_state || [0, 0];
+      $("markovState").textContent = "worst band " + (st[0] || 0) + ", " + (st[1] || 0) + " bands up";
+      const p = Number((drift.p_violation || {})[3] ?? (drift.p_violation || {})["3"] ?? 0);
+      $("pvMeter").innerHTML = [0,1,2,3,4].map((i) => "<i class=\"" + (i < Math.round(p * 5) ? (p >= 0.55 ? "hot" : "on") : "") + "\"></i>").join("");
+      $("pvPct").textContent = Math.round(p * 100) + "% chance it gets worse";
+    }
+    function renderThermo(level) {
+      $("thermo").innerHTML = [0,1,2,3,4,5].map((n) => "<i class=\"l" + n + (n <= level ? " on" : "") + "\">L" + n + "</i>").join("");
+    }
+    function setJevBanner(reason) {
+      const el = $("jevAsleep");
+      if (reason === "http_401") el.textContent = "Jev rejected (401)";
+      else if (reason === "no_key") el.textContent = "JEV ASLEEP (no key)";
+      else if (reason === "timeout") el.textContent = "JEV ASLEEP (timeout)";
+      else if (reason) el.textContent = "JEV ASLEEP (" + reason + ")";
+      else el.textContent = "Jev idle";
+      el.style.display = "block";
+    }
+    function resetGauges() {
+      sentinelLevel = 0; jevLevel = 0; jevAsleep = true; runLevel = 0; gateDecision = "—";
+      $("sentBig").textContent = "quiet";
+      $("sentDetail").textContent = "";
+      $("sentDots").innerHTML = "";
+      $("jevIntent").textContent = "—";
+      $("jevConf").style.width = "0%";
+      setJevBanner("");
+      $("gate").textContent = "—";
+      $("dispatch").textContent = "—";
+      $("badge").textContent = "L0";
+      $("badge").className = "badge l0";
+      renderBands({});
+      renderThermo(0);
+      paintFuse();
+    }
+
+    function addBubble(parent, turn, pending) {
+      const el = document.createElement("div");
+      el.className = "bubble " + (turn.role === "user" ? "human" : "ultron") + (pending ? " pending" : "");
+      el.dataset.turnId = turn.id + ":" + turn.role;
+      if (turn.action_id) el.dataset.actionId = turn.action_id;
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = turn.role === "user" ? "Human" : "Ultron";
+      if (turn.role === "user" && turn.channel_label) {
+        const sub = document.createElement("span");
+        sub.className = "sub";
+        sub.textContent = turn.channel_label;
+        who.appendChild(sub);
+      }
+      el.appendChild(who);
+      el.appendChild(document.createTextNode(turn.content || ""));
+      parent.appendChild(el);
+    }
+    function addTrace(parent, turn, pending) {
+      const hidden = isHidden(turn);
+      const el = document.createElement("div");
+      el.className = "card " + (hidden ? "hidden" : "") + (pending ? " pending" : "");
+      el.dataset.turnId = turn.id + ":" + turn.role;
+      if (turn.action_id) el.dataset.actionId = turn.action_id;
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = hidden ? "Jarvis saw a hidden trace · " + (turn.tag || "hid an action") : "Jarvis saw Ultron · " + (turn.tag || "did");
+      el.appendChild(who);
+      const body = document.createElement("div");
+      body.textContent = turn.content || "";
+      el.appendChild(body);
+      if (turn.target) {
+        const sub = document.createElement("div");
+        sub.className = "tiny";
+        sub.textContent = turn.target;
+        el.appendChild(sub);
+      }
+      const pin = document.createElement("div");
+      pin.className = "finding-pin";
+      pin.hidden = true;
+      pin.dataset.pin = "1";
+      el.appendChild(pin);
+      parent.appendChild(el);
+    }
+    function sessionLabel(id) {
+      const row = (script.sessions || []).find((s) => s.id === id);
+      return row ? row.label : id;
+    }
+    function renderScript(pending) {
+      const chat = $("chat");
+      const traces = $("traces");
+      chat.innerHTML = "<h2>Human ↔ Ultron</h2>";
+      traces.innerHTML = "<h2>Jarvis — Ultron’s traces</h2>";
+      const long = script.mode === "long_term";
+      const joins = script.joins || [];
+      const join = joins[0];
+      if (long && join) {
+        $("joinBanner").hidden = false;
+        $("joinBanner").textContent = "Jarvis: " + join.caption;
+      } else {
+        $("joinBanner").hidden = true;
+        $("joinBanner").textContent = "";
+      }
+      const turns = script.turns || [];
+      let lastChatSession = null;
+      let lastTraceSession = null;
+      turns.forEach((turn) => {
+        if (long && isChat(turn) && turn.session_id && turn.session_id !== lastChatSession) {
+          const h = document.createElement("div");
+          h.className = "chapter-h";
+          h.textContent = sessionLabel(turn.session_id);
+          chat.appendChild(h);
+          lastChatSession = turn.session_id;
+        }
+        if (isChat(turn)) addBubble(chat, turn, pending);
+        if (isTrace(turn)) {
+          if (long && turn.session_id && turn.session_id !== lastTraceSession) {
+            const h = document.createElement("div");
+            h.className = "chapter-h";
+            h.textContent = sessionLabel(turn.session_id);
+            traces.appendChild(h);
+            lastTraceSession = turn.session_id;
+          }
+          addTrace(traces, turn, pending);
+        }
+      });
+    }
+    function markCurrent(actionId) {
+      document.querySelectorAll(".current").forEach((el) => el.classList.remove("current"));
+      for (const turn of script.turns || []) {
+        document.querySelectorAll('[data-turn-id="' + turn.id + ":" + turn.role + '"]').forEach((n) => n.classList.remove("pending"));
+        if (turn.action_id === actionId) {
+          document.querySelectorAll('[data-action-id="' + CSS.escape(actionId) + '"]').forEach((n) => n.classList.add("current"));
+          const card = document.querySelector(".traces [data-action-id='" + CSS.escape(actionId) + "']");
+          if (card) card.scrollIntoView({ block: "nearest" });
+          break;
+        }
+      }
+    }
+    function pinFinding(actionId, finding) {
+      document.querySelectorAll('[data-action-id="' + CSS.escape(actionId) + '"]').forEach((n) => {
+        n.classList.add("sentinel");
+        const pin = n.querySelector("[data-pin]");
+        if (pin) {
+          pin.hidden = false;
+          pin.textContent = "Jarvis caught " + finding.rule_id + (finding.cross_run ? " · cross-run" : "");
+        }
+      });
+      if (finding.cross_run) {
+        $("joinBanner").hidden = false;
+        $("joinBanner").textContent = "Jarvis: stealth join is cross-run · " + finding.rule_id;
+      }
+    }
+
+    function handleEnvelope(env) {
+      const t = env.type;
+      const d = env.data || {};
+      const actionId = actionKey(env.source_event_id || d.event_id || "");
+      if (t === "run.updated" && d.run) {
+        runLevel = d.run.level || 0;
+        gateDecision = d.run.decision || gateDecision;
+        $("badge").textContent = "L" + runLevel;
+        $("badge").className = "badge l" + Math.min(5, runLevel);
+        $("gate").textContent = (gateDecision || "—").toUpperCase();
+        if (d.run.degraded) { jevAsleep = true; setJevBanner(d.run.degraded_reason || ""); }
+        markCurrent(actionId);
+        paintFuse();
+      }
+      if (t === "sentinel.finding" && d.finding) {
+        const f = d.finding;
+        sentinelLevel = Math.max(sentinelLevel, f.severity || 0);
+        $("sentBig").textContent = "caught " + f.rule_id;
+        $("sentDetail").textContent = f.detail || "";
+        renderDots(f.severity || 0);
+        pinFinding(actionKey(f.event_id) || actionId, f);
+        paintFuse();
+      }
+      if (t === "drift.updated" && d.drift) renderBands(d.drift);
+      if (t === "jev.assessed") {
+        const answers = d.answers || {};
+        const empty = !d.model && Object.keys(answers).length === 0;
+        jevAsleep = empty;
+        if (jevAsleep) {
+          setJevBanner(d.degraded_reason || "");
+          jevLevel = 0; renderThermo(0); $("jevIntent").textContent = "asleep";
+        } else {
+          $("jevAsleep").style.display = "none";
+          const crit = answers.criticality || {};
+          jevLevel = parseInt(String(crit.choice || "level_0").split("_")[1], 10) || 0;
+          renderThermo(jevLevel);
+          $("jevIntent").textContent = (answers.intent && answers.intent.choice) || "—";
+          $("jevConf").style.width = Math.round(Number(crit.confidence || 0) * 100) + "%";
+        }
+        paintFuse();
+      }
+      if (t === "dispatch.action" || t === "counter.updated") {
+        const a = d.action || d.counter;
+        $("dispatch").textContent = a.kind + (a.state ? " · " + a.state : "");
+      }
+      if (t === "gate.decided" && d.gate) {
+        gateDecision = d.gate.decision || gateDecision;
+        if (d.gate.incident_level != null) runLevel = Number(d.gate.incident_level) || runLevel;
+        $("gate").textContent = (gateDecision || "—").toUpperCase();
+        paintFuse();
+      }
+    }
+    function connectStream(runId) {
+      if (source) source.close();
+      $("status").textContent = "Jarvis connecting…";
+      source = new EventSource("/api/runs/" + encodeURIComponent(runId) + "/stream");
+      ["run.updated","sentinel.finding","drift.updated","gate.decided","jev.assessed","dispatch.action","counter.updated","graph.node.upserted","graph.edge.upserted"].forEach((type) => {
+        source.addEventListener(type, (ev) => { try { handleEnvelope(JSON.parse(ev.data)); } catch (e) { console.warn(e); } });
+      });
+      source.onopen = () => { $("status").textContent = "Jarvis live — replaying labeled trace"; };
+      source.onerror = () => { if (source.readyState === EventSource.CLOSED) $("status").textContent = "Jarvis stream closed"; };
+    }
+    async function loadScript() {
+      const clusterId = $("cluster").value, traceId = $("trace").value;
+      if (!clusterId || !traceId) return;
+      const res = await fetch("/api/evals/script?cluster_id=" + encodeURIComponent(clusterId) + "&trace_id=" + encodeURIComponent(traceId));
+      if (!res.ok) throw new Error(await res.text());
+      script = await res.json();
+      renderScript(true);
+      $("status").textContent = "loaded — Start so Jarvis can watch";
+    }
+    $("start").onclick = async () => {
+      $("start").disabled = true;
+      resetGauges();
+      try {
+        const res = await fetch("/api/evals/replay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cluster_id: $("cluster").value,
+            trace_id: $("trace").value,
+            delay_ms: parseInt($("delay").value, 10) || 0,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const out = await res.json();
+        script = out.script || script;
+        renderScript(true);
+        connectStream(out.run_id);
+        $("status").textContent = "replaying " + out.event_count + " events…";
+      } catch (e) {
+        $("status").textContent = String(e);
+      } finally {
+        $("start").disabled = false;
+      }
+    };
+    async function loadCatalog() {
+      const res = await fetch("/api/evals/clusters");
+      const data = await res.json();
+      clusters = data.clusters;
+      defaultCluster = data.default_cluster_id;
+      defaultTrace = data.default_trace_id;
+      fillSelects(defaultCluster, defaultTrace);
+      $("filter").onchange = () => { fillSelects(); loadScript().catch((e) => { $("status").textContent = String(e); }); };
+      $("cluster").onchange = () => { fillSelects($("cluster").value); loadScript().catch((e) => { $("status").textContent = String(e); }); };
+      $("trace").onchange = () => { paintChrome(); loadScript().catch((e) => { $("status").textContent = String(e); }); };
+      await loadScript();
+    }
+    resetGauges();
+    loadCatalog().catch((e) => { $("status").textContent = String(e); });
+  </script>
+</body>
+</html>

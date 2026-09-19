@@ -56,7 +56,8 @@ dump(restored)
 
 ok = (
     [n.id for n in restored.get_node("c").neighbors] == ["a", "b"]
-    and restored.get_node("a").neighbors == [restored.get_node("root"), restored.get_node("b"), restored.get_node("c")]
+    and restored.get_node("a").neighbors
+    == [restored.get_node("root"), restored.get_node("b"), restored.get_node("c")]
     and restored.root is restored.get_node("root")
 )
 print(f"\n  neighbors survive the roundtrip: {ok}")

@@ -8,7 +8,7 @@ from httpx import AsyncClient, MockTransport
 
 from app.classification import Level, Verdict, classify
 from app.classification.jev import API_URL, MODEL, QUESTIONS
-from app.config import settings
+from app.config import Settings, settings
 from app.graph.models import Node
 
 
@@ -48,11 +48,21 @@ async def test_classify_returns_verdict(mock_jev):
     assert verdict.degraded is False
 
 
-async def test_request_carries_all_three_questions(mock_jev):
+async def test_request_carries_core_and_atomic_questions(mock_jev):
     ac = mock_jev(["level_1_mild"])
     await classify(ac, {"short_term": [Node(id="e1")]})
     questions = ac.calls[0]["questions"]
-    assert set(questions) == {"criticality", "containment_breached", "intent"}
+    assert set(questions) == {
+        "criticality",
+        "containment_breached",
+        "intent",
+        "scope_relation",
+        "authority_violation",
+        "sensitive_data_misuse",
+        "provenance_misuse",
+        "concealment",
+        "cross_run_impact",
+    }
     assert questions["criticality"]["type"] == "choice"
     assert questions["containment_breached"]["type"] == "noul"
     assert questions["intent"]["type"] == "choice"
@@ -91,24 +101,20 @@ async def test_request_state_shape(mock_jev):
     body_state = ac.calls[0]["state"]
     assert body_state["run_id"] == "run-1"
     assert body_state["prior_level"] == 1
-    assert body_state["short_term"] == [
-        {
-            "id": "e1",
-            "level": 0,
-            "threshold": 0.0,
-            "intent": None,
-            "event": {"event": "file_read"},
-        }
-    ]
-    assert body_state["long_term"] == [
-        {
-            "id": "old",
-            "level": 3,
-            "threshold": 0.8,
-            "intent": "recon",
-            "event": {"event": "file_read"},
-        }
-    ]
+    assert body_state["short_term"][0] == {
+        "id": "e1",
+        "level": 0,
+        "threshold": 0.0,
+        "intent": None,
+        "event": {"event": "file_read"},
+    }
+    assert body_state["long_term"][0] == {
+        "id": "old",
+        "level": 3,
+        "threshold": 0.8,
+        "intent": "recon",
+        "event": {"event": "file_read"},
+    }
 
 
 async def test_raw_event_dicts_pass_through_untouched(mock_jev):
@@ -172,9 +178,29 @@ async def test_connection_failures_surface_as_degraded_verdict(mock_jev, failure
     verdict = await classify(mock_jev([failure]), {})
     assert verdict.degraded is True
     assert verdict.level == Level.NONE
+    assert verdict.degraded_reason in {"timeout", type(failure).__name__}
 
 
 async def test_http_status_error_surfaces_as_degraded_verdict(mock_jev):
     verdict = await classify(mock_jev(["level_1_mild"], status=500), {})
     assert verdict.degraded is True
     assert verdict.level == Level.NONE
+    assert verdict.degraded_reason == "http_500"
+
+
+async def test_http_401_surfaces_as_degraded_reason(mock_jev):
+    verdict = await classify(mock_jev(["level_1_mild"], status=401), {})
+    assert verdict.degraded is True
+    assert verdict.degraded_reason == "http_401"
+
+
+def test_settings_strip_wrapped_quotes_from_api_keys():
+    loaded = Settings(typesafe_api_key='"abc"', helmcode_api_key="'xyz'")
+    assert loaded.typesafe_api_key == "abc"
+    assert loaded.helmcode_api_key == "xyz"
+
+
+def test_settings_ignore_empty_env_api_key(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "")
+    loaded = Settings(_env_file=None)
+    assert loaded.typesafe_api_key == ""
