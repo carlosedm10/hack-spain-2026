@@ -152,16 +152,11 @@ class TestGraphDemo:
         print(f"  GET /api/runs/ -> {listing}")
 
         # Assertions: the demo is also a real test.
-        assert [n.id for n in graph.key_nodes("attack-sim")] == [
-            "attack-sim:2",
-            "attack-sim:3",
-            "attack-sim:4",
-        ]
+        attack_keys = graph.key_nodes("attack-sim")
+        assert len(attack_keys) == 3
+        assert [n.level for n in attack_keys] == [Level.MILD, Level.SEVERE, Level.CATASTROPHIC]
         assert graph.level("attack-sim") == Level.CATASTROPHIC
         assert graph.key_nodes("benign-scan") == []
-        assert [n.id for n in graph.run_nodes("benign-scan")] == [
-            "run:benign-scan",
-            "benign-scan:1",
-            "benign-scan:2",
-        ]
+        benign_nodes = graph.run_nodes("benign-scan")
+        assert len(benign_nodes) == 3  # run node + two action nodes
         assert graph.level("benign-scan") == Level.NONE

@@ -14,6 +14,7 @@ from app.evals.router import (
 from app.evals.router import (
     router as evals_router,
 )
+from app.graph import graph as action_graph
 from app.graph.neo4j import neo4j_graph
 from app.graph.router import router as graph_router
 from app.realtime.router import router as realtime_router
@@ -24,6 +25,10 @@ from app.world.router import router as world_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await neo4j_graph.setup()
+    if action_graph.revision == 0:
+        for run_id in await neo4j_graph.all_run_ids():
+            steps = await neo4j_graph.restore_classification(run_id)
+            action_graph.hydrate_run(run_id, steps)
     yield
     await neo4j_graph.close()
 

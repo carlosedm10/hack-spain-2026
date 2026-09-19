@@ -31,6 +31,7 @@ type DashboardProps = {
   logs: DemoLog[];
   status: GraphStreamStatus | null;
   onRestart?: () => void;
+  onTrigger?: () => void;
 };
 
 function Dashboard({
@@ -40,6 +41,7 @@ function Dashboard({
   logs,
   status,
   onRestart,
+  onTrigger,
 }: DashboardProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selected = selectedNodeId ? graph.nodes.get(selectedNodeId) : null;
@@ -86,6 +88,7 @@ function Dashboard({
                 selectedNodeId={selectedNodeId}
                 onSelectNode={setSelectedNodeId}
                 onRestart={onRestart}
+                onTrigger={onTrigger}
                 status={status}
               />
             </div>
@@ -203,6 +206,20 @@ function StreamDashboard() {
     [incident],
   );
   const logs = useMemo(() => logsFromGraph(view), [view]);
+
+  const triggerRun = async () => {
+    const scenario = Math.random() < 0.5 ? "exfil" : "lateral";
+    try {
+      await fetch("/api/demo/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario, delay_ms: 400 }),
+      });
+    } catch {
+      // The request starts a background ingest; errors are surfaced in the logs.
+    }
+  };
+
   return (
     <Dashboard
       graph={view}
@@ -210,6 +227,7 @@ function StreamDashboard() {
       actions={actions}
       logs={logs}
       status={status}
+      onTrigger={triggerRun}
     />
   );
 }

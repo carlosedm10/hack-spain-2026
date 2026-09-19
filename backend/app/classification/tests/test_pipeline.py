@@ -75,7 +75,7 @@ def _routed_client(jev_answers: list[Any], watcher_replies: list[Any]) -> AsyncC
 
 
 def _event_nodes(run_id: str):
-    return [n for n in graph.run_nodes(run_id) if n.id.startswith(f"{run_id}:")]
+    return [n for n in graph.run_nodes(run_id) if run_id in n.run_ids and not n.id.startswith("run:")]
 
 
 async def test_confident_verdict_materializes_node_without_watcher():
@@ -88,7 +88,6 @@ async def test_confident_verdict_materializes_node_without_watcher():
     assert verdict.degraded is False
     nodes = _event_nodes("r1")
     assert len(nodes) == 1
-    assert nodes[0].id == "r1:1"
     assert nodes[0].threshold == 0.91
     assert nodes[0].event == EVENT
     assert nodes[0].action_id is None

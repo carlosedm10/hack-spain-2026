@@ -8,12 +8,14 @@ import {
   type GraphNode,
 } from "@/graph/protocol";
 
-function node(id: string, neighbors: string[] = []): GraphNode {
+function node(id: string, neighbors: string[] = [], runId: string | null = null): GraphNode {
   return {
     id,
     neighbors,
     threshold: 0,
-    run_id: null,
+    run_id: runId,
+    run_ids: runId ? [runId] : [],
+    visit_count: 1,
     level: 0,
     intent: null,
     event: null,

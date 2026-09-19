@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
+import uuid
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field, StrictInt
 
 from app.actions.journal import ActionJournal
@@ -12,6 +15,8 @@ from app.actions.models import IncidentActionState
 from app.actions.pager import HappyRobotPager
 from app.actions.service import ActionService
 from app.config import settings
+from app.evals import trace_generator
+from app.runs import service as runs_service
 
 router = APIRouter()
 
@@ -112,3 +117,52 @@ def get_incident(
     service: ActionServiceDependency,
 ) -> IncidentActionState:
     return service.get_state(incident_id)
+
+
+class TriggerRequest(BaseModel):
+    scenario: str | None = Field(default=None)
+    delay_ms: int = Field(default=400, ge=0, le=10_000)
+
+
+class TriggerResponse(BaseModel):
+    run_id: str
+    scenario: str | None
+    event_count: int
+
+
+@router.post("/trigger", response_model=TriggerResponse)
+async def trigger_run(
+    body: TriggerRequest,
+    background: BackgroundTasks,
+) -> TriggerResponse:
+    scenario = body.scenario
+    if scenario is not None and scenario not in trace_generator._TRIGGERS:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario: {scenario}")
+
+    run_id = f"trigger-{uuid.uuid4().hex[:8]}"
+    events, *_ = trace_generator.build_run(
+        run_id,
+        agent_pool=[],
+        channel_pool=[],
+        target_pool=[],
+        tool_pool=[],
+        derived_pool=[],
+        min_cover=5,
+        max_cover=8,
+        scenario=scenario,
+    )
+
+    async def _ingest() -> None:
+        async with httpx.AsyncClient() as client:
+            for event in events:
+                trace_generator.normalize_event_payload(event)
+                await runs_service.ingest(run_id, event, client)
+                if body.delay_ms:
+                    await asyncio.sleep(body.delay_ms / 1000)
+
+    background.add_task(_ingest)
+    return TriggerResponse(
+        run_id=run_id,
+        scenario=scenario,
+        event_count=len(events),
+    )

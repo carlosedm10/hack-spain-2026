@@ -30,6 +30,8 @@ function node(
     neighbors,
     threshold: 0,
     run_id: runId,
+    run_ids: runId ? [runId] : [],
+    visit_count: 1,
     level: 0,
     intent: null,
     event: null,

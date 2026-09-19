@@ -298,6 +298,14 @@ class Neo4jGraphStore:
             result = await session.run(query, **params)
             return [record["run_id"] async for record in result if record.get("run_id")]
 
+    async def all_run_ids(self) -> list[str]:
+        if not self.enabled:
+            return []
+        query = "MATCH (r:Run) RETURN r.id AS run_id ORDER BY r.id"
+        async with self._get_driver().session(database=settings.neo4j_database) as session:
+            result = await session.run(query)
+            return [record["run_id"] async for record in result if record.get("run_id")]
+
     async def restore_neighborhood(
         self, event: MonitorEvent, limit: int = RUN_WINDOW
     ) -> dict[str, list[MonitorEvent]]:

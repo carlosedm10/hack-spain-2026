@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 import threading
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -15,6 +17,29 @@ from app.classification.models import Level
 from app.config import settings
 from app.graph.models import Node
 from app.graph.neo4j import ClassificationStep
+
+
+def _signature(
+    event: dict[str, Any] | None, run_id: str, seq: int
+) -> str:
+    """Stable action signature used to collapse repeated/related actions into one graph node.
+
+    When the event carries no distinguishing fields we fall back to a per-run
+    sequence id so that legacy/unit-test appends still get distinct nodes.
+    """
+    if isinstance(event, dict):
+        kind = event.get("kind") or event.get("event")
+        tool = event.get("tool")
+        target = event.get("target") or event.get("path") or event.get("dst") or event.get("cmd")
+        args = event.get("args")
+        if kind or tool or target or args:
+            key = json.dumps(
+                {"kind": kind, "tool": tool, "target": target, "args": args},
+                sort_keys=True,
+                default=str,
+            )
+            return hashlib.sha256(key.encode()).hexdigest()[:12]
+    return f"evt-{run_id}:{seq}"
 
 _UPDATABLE_FIELDS = frozenset({"level", "threshold", "intent", "event", "action_id"})
 
@@ -40,6 +65,11 @@ class ActionGraph:
         self._batch_depth = 0
         self._dirty_upserts: dict[str, None] = {}
         self._dirty_removed: set[str] = set()
+        self._event_index: dict[str, Node] = {}
+        self._pending_causal: defaultdict[str, list[Node]] = defaultdict(list)
+        self._signature_index: dict[str, Node] = {}
+        self._run_tails: dict[str, Node] = {}
+        self._run_visits: defaultdict[str, list[str]] = defaultdict(list)
 
     def subscribe(self, listener: GraphListener) -> dict[str, Any]:
         with self._lock:
@@ -143,12 +173,12 @@ class ActionGraph:
             node = Node(id=node_id, threshold=value, tool=tool, **fields)
             with self._batch():
                 self._nodes[node_id] = node
+                self._register_event_id(node)
                 if connect is not None:
-                    connect.neighbors.append(node)
-                    node.neighbors.append(connect)
-                    self._mark_upsert(connect)
+                    self._safe_connect(node, connect)
                 else:
                     self._root_id = node_id
+                self._link_causal(node)
                 self._mark_upsert(node)
             return node
 
@@ -168,6 +198,45 @@ class ActionGraph:
                 self._mark_upsert(src)
                 self._mark_upsert(dst)
 
+    def _safe_connect(self, src: Node, dst: Node) -> None:
+        """Idempotent connect used for causal/cross-run edges."""
+        if self._nodes.get(src.id) is not src or self._nodes.get(dst.id) is not dst:
+            return
+        if src is dst or dst in src.neighbors:
+            return
+        with self._batch():
+            src.neighbors.append(dst)
+            dst.neighbors.append(src)
+            self._mark_upsert(src)
+            self._mark_upsert(dst)
+
+    def _register_event_id(self, node: Node) -> None:
+        event_id = node.event.get("id") if isinstance(node.event, dict) else None
+        if not isinstance(event_id, str):
+            return
+        self._event_index[event_id] = node
+        pending = self._pending_causal.pop(event_id, [])
+        for pending_node in pending:
+            self._safe_connect(pending_node, node)
+
+    def _link_causal(self, node: Node) -> None:
+        if not isinstance(node.event, dict):
+            return
+        refs = [
+            *(node.event.get("caused_by") or []),
+            *(node.event.get("derived_from") or []),
+        ]
+        seen: set[str] = set()
+        for source_id in refs:
+            if not isinstance(source_id, str) or source_id in seen:
+                continue
+            seen.add(source_id)
+            source = self._event_index.get(source_id)
+            if source is not None:
+                self._safe_connect(node, source)
+            else:
+                self._pending_causal[source_id].append(node)
+
     def ensure_run(self, run_id: str) -> Node:
         if not isinstance(run_id, str) or not run_id:
             raise ValueError(f"run id must be a non-empty string, got {run_id!r}")
@@ -179,7 +248,12 @@ class ActionGraph:
                 if self._root_id is None:
                     self.add_node("root")
                 root = self._nodes[self._root_id]
-                return self.add_node(f"run:{run_id}", connect=root, run_id=run_id)
+                return self.add_node(
+                    f"run:{run_id}",
+                    connect=root,
+                    run_id=run_id,
+                    run_ids={run_id},
+                )
 
     def append(
         self,
@@ -192,35 +266,72 @@ class ActionGraph:
         action_id: str | None = None,
     ) -> Node:
         with self._lock, self._batch():
-            # Composite op: ensure_run may create the root and the run node
-            # before the new key node — all of it lands in one GraphUpdate.
             run_node = self.ensure_run(run_id)
-            # Run membership is the run_id stamp, not graph traversal: an undirected
-            # graph cannot keep runs isolated by direction alone.
-            chained = [n for n in self._nodes.values() if n.run_id == run_id and n is not run_node]
-            last = chained[-1] if chained else run_node
-            seq = len(chained) + 1
-            return self.add_node(
-                f"{run_id}:{seq}",
-                connect=last,
-                threshold=threshold,
-                run_id=run_id,
-                level=Level(level),
-                intent=intent,
-                event=event,
-                action_id=action_id,
-                created_at=datetime.now(UTC),
-            )
+            seq = len(self._run_visits.get(run_id, [])) + 1
+            sig = _signature(event, run_id, seq)
+            node_id = f"{run_id}:{seq}" if sig.startswith("evt-") else f"act:{sig}"
+            existing = self._signature_index.get(sig)
+            tail = self._run_tails.get(run_id, run_node)
+            level_value = Level(level)
+
+            if existing is None:
+                node = self.add_node(
+                    node_id,
+                    connect=tail,
+                    threshold=threshold,
+                    run_id=run_id,
+                    run_ids={run_id},
+                    visit_count=1,
+                    signature=sig,
+                    level=level_value,
+                    intent=intent,
+                    event=event,
+                    action_id=action_id,
+                    created_at=datetime.now(UTC),
+                )
+                self._signature_index[sig] = node
+            else:
+                node = existing
+                node.run_ids.add(run_id)
+                node.visit_count += 1
+                node.event = event
+                if action_id is not None:
+                    node.action_id = action_id
+                if level_value > node.level:
+                    node.level = level_value
+                    node.intent = intent
+                    node.threshold = threshold
+                if tail is not node:
+                    self._safe_connect(tail, node)
+                self._register_event_id(node)
+                self._link_causal(node)
+                self._mark_upsert(node)
+
+            self._run_tails[run_id] = node
+            self._run_visits[run_id].append(node.id)
+            return node
+
+    def last_action(self, run_id: str) -> Node | None:
+        with self._lock:
+            tail = self._run_tails.get(run_id)
+            if tail is None or tail.id.startswith("run:"):
+                return None
+            return tail
 
     def run_nodes(self, run_id: str) -> list[Node]:
         with self._lock:
             run_node = self._nodes.get(f"run:{run_id}")
             if run_node is None:
                 return []
-            return [
-                run_node,
-                *(n for n in self._nodes.values() if n.run_id == run_id and n is not run_node),
-            ]
+            ordered: list[Node] = [run_node]
+            seen: set[str] = {run_node.id}
+            for node_id in self._run_visits.get(run_id, []):
+                node = self._nodes.get(node_id)
+                if node is None or node.id in seen:
+                    continue
+                seen.add(node.id)
+                ordered.append(node)
+            return ordered
 
     def key_nodes(self, run_id: str) -> list[Node]:
         return [n for n in self.run_nodes(run_id) if n.level >= Level.MILD]
@@ -235,32 +346,21 @@ class ActionGraph:
         )
 
     def hydrate_run(self, run_id: str, steps: list[ClassificationStep]) -> None:
-        """Rebuild the in-memory chain from Neo4j when this run is not cached yet."""
+        """Rebuild the in-memory action graph from Neo4j, reusing shared action nodes."""
         with self._lock:
-            chained = [
-                node
-                for node in self._nodes.values()
-                if node.run_id == run_id and node.id != f"run:{run_id}"
-            ]
-            if chained or not steps:
+            if run_id in self._run_tails or not steps:
                 return
             with self._batch():
-                run_node = self.ensure_run(run_id)
-                last = run_node
-                for index, step in enumerate(steps, start=1):
-                    node_id = f"{run_id}:{index}"
-                    node = self.add_node(
-                        node_id,
-                        connect=last,
-                        threshold=step.threshold,
-                        run_id=run_id,
+                self.ensure_run(run_id)
+                for step in steps:
+                    self.append(
+                        run_id,
                         level=step.level,
+                        threshold=step.threshold,
                         intent=step.intent,
                         event=step.event,
                         action_id=None,
-                        created_at=datetime.now(UTC),
                     )
-                    last = node
 
     def update(self, node_id: str, **fields: Any) -> Node:
         unknown = set(fields) - _UPDATABLE_FIELDS
@@ -276,8 +376,23 @@ class ActionGraph:
             if node is None:
                 raise ValueError(f"node id does not exist: {node_id!r}")
             with self._batch():
+                old_event_id = (
+                    node.event.get("id") if isinstance(node.event, dict) else None
+                )
                 for name, value in fields.items():
                     setattr(node, name, value)
+                new_event_id = (
+                    node.event.get("id") if isinstance(node.event, dict) else None
+                )
+                if old_event_id != new_event_id:
+                    if old_event_id is not None and self._event_index.get(old_event_id) is node:
+                        del self._event_index[old_event_id]
+                    if new_event_id is not None:
+                        self._event_index[new_event_id] = node
+                        pending = self._pending_causal.pop(new_event_id, [])
+                        for pending_node in pending:
+                            self._safe_connect(pending_node, node)
+                self._link_causal(node)
                 self._mark_upsert(node)
             return node
 
@@ -287,6 +402,11 @@ class ActionGraph:
             with self._batch():
                 self._nodes = {}
                 self._root_id = None
+                self._event_index = {}
+                self._pending_causal.clear()
+                self._signature_index = {}
+                self._run_tails = {}
+                self._run_visits = defaultdict(list)
                 for node_id in removed:
                     self._mark_removed(node_id)
 
@@ -315,10 +435,16 @@ class ActionGraph:
         with self._lock:
             created: dict[str, Node] = {}
             for row in rows:
+                run_id = row.get("run_id")
+                run_ids = set(row.get("run_ids") or ([run_id] if run_id else []))
+                visit_count = row.get("visit_count", 1)
                 node = Node(
                     id=row["id"],
                     threshold=_validate_threshold(row["threshold"]),
-                    run_id=row.get("run_id"),
+                    run_id=run_id,
+                    run_ids=run_ids,
+                    visit_count=visit_count,
+                    signature=row.get("signature"),
                     level=Level(row.get("level", 0)),
                     intent=row.get("intent"),
                     event=row.get("event"),
@@ -360,6 +486,29 @@ class ActionGraph:
                     self._mark_removed(node_id)
                 self._nodes = created
                 self._root_id = root_id
+                self._event_index = {}
+                self._pending_causal.clear()
+                self._signature_index = {}
+                self._run_tails = {}
+                self._run_visits = defaultdict(list)
+                for node in created.values():
+                    self._register_event_id(node)
+                for node in created.values():
+                    self._link_causal(node)
+                for node in created.values():
+                    sig = node.signature
+                    if sig is None:
+                        if node.id.startswith("act:"):
+                            sig = node.id[4:]
+                        else:
+                            sig = _signature(node.event, node.run_id or "", 0)
+                    existing = self._signature_index.get(sig)
+                    if existing is None or node.visit_count > existing.visit_count:
+                        self._signature_index[sig] = node
+                    if node.run_id is not None:
+                        self._run_tails[node.run_id] = node
+                    for rid in node.run_ids:
+                        self._run_visits[rid].append(node.id)
                 for node in created.values():
                     self._mark_upsert(node)
 
@@ -385,6 +534,8 @@ def _node_payload(node: Node) -> dict[str, Any]:
         "neighbors": [n.id for n in node.neighbors],
         "threshold": node.threshold,
         "run_id": node.run_id,
+        "run_ids": sorted(node.run_ids),
+        "visit_count": node.visit_count,
         "level": int(node.level),
         "intent": node.intent,
         "event": node.event,
@@ -401,6 +552,12 @@ def _node_row(node: Node) -> dict[str, Any]:
     }
     if node.run_id is not None:
         row["run_id"] = node.run_id
+    if node.run_ids:
+        row["run_ids"] = sorted(node.run_ids)
+    if node.visit_count != 1:
+        row["visit_count"] = node.visit_count
+    if node.signature is not None:
+        row["signature"] = node.signature
     if node.level != Level.NONE:
         row["level"] = int(node.level)
     if node.intent is not None:

@@ -20,8 +20,9 @@ On every new event, `jev` re-reads **short-term and long-term context in paralle
 How `jev` rewrites, promotes, or weights those nodes is `jev`'s job. We always hand it both contexts; we do not freeze old scores on our side. Request schema and how the two contexts map to `state`: [Jev.md](Jev.md).
 
 * Dynamic: Starts empty and supports adding nodes at runtime.
-* Single-rooted: exactly one root — the first node created; every run node hangs off it (`root → run:{run_id} → {run_id}:1 → {run_id}:2 → …`), created lazily by `ensure_run(run_id)`. `root` is an entry point, not a parent.
-* Undirected: nodes keep `neighbors` — a **mutual** adjacency list: if `a` lists `b`, `b` lists `a`. There is no `parent`: a node can have any number of neighbors, and **loops are allowed**. `connect(src, dst)` adds a mutual edge between two existing nodes (duplicates and self-loops rejected). Traversals (`reachable()`) are cycle-safe (visited set), so a loop can never hang `save`/`load`.
+* Single-rooted: exactly one root — the first node created; every run node hangs off it (`root → run:{run_id} → action nodes`), created lazily by `ensure_run(run_id)`. `root` is an entry point, not a parent.
+* Shared actions: action nodes are keyed by a stable signature derived from `kind`, `tool`, `target`, and `args`. The same action in different runs maps to one node with `run_ids` and `visit_count`, and later steps can link back to earlier ones, forming cycles.
+* Undirected: nodes keep `neighbors` — a **mutual** adjacency list: if `a` lists `b`, `b` lists `a`. There is no `parent`: a node can have any number of neighbors, and **cycles are allowed** (self-loops are rejected). `connect(src, dst)` adds a mutual edge between two existing nodes (duplicates and self-loops rejected). Traversals (`reachable()`) are cycle-safe (visited set), so a loop can never hang `save`/`load`.
 * Runs are isolated by `run_id`, not by the graph: with undirected edges, traversal alone cannot tell runs apart, so a run's nodes are exactly the ones stamped with its `run_id` (in insertion order). Even explicit cross-run edges cannot leak one run's nodes into another's level or key-node history. Sentinel inspect history is **link-scoped** (current run plus events that share target, `derived_from`/`caused_by`, agent+target, memory/entity, or tool+target). When Neo4j is enabled, linked runs are **rehydrated from the store** into the in-process monitor cache before `inspect`; without Neo4j, cross-run links exist only for runs still present in the same process.
 * Complete: one node per classified action — a `level_0_benign` verdict still materializes a `Level.NONE` node. The flagged subset is `key_nodes()` (level ≥ 1). Degraded Jev stays tape-only **unless** Sentinel/gate already raised the run level; that elevation is materialized so the run cannot drop on the next event.
 * Node: Each node has a threshold and an optional associated tool (default: `None`). A materialized node also records `{run_id, level, intent, event, action_id, created_at}` — the evidence needed to replay a run and drive the playbooks ([Actions.md](Actions.md)).
@@ -34,7 +35,7 @@ Implemented in `backend/app/graph/`: `Node` lives in `models.py`, the `ActionGra
 
 ### Run state is derived, not stored in ActionGraph alone
 
-Neo4j persists `:Run` nodes (escalate-only `level`, timestamps) plus every `:Event`, `:Assessment`, and entity edge. The in-memory **ActionGraph** is a write-through cache: `prior_level`, `key_nodes`, and `/api/graph/stream` read it after **hydration from Neo4j** on ingest (see `backend/app/runs/service.py`). If the process restarts, classification and Sentinel inspect rehydrate from the store; RAM is not a second source of truth when Neo4j is enabled.
+Neo4j persists `:Run` nodes (escalate-only `level`, timestamps) plus every `:Event`, `:Assessment`, and entity edge. The in-memory **ActionGraph** is a write-through cache: `prior_level`, `key_nodes`, and `/api/graph/stream` read it after **hydration from Neo4j** on ingest (see `backend/app/runs/service.py`). On application startup, every persisted run is restored into the ActionGraph so the global stream is never empty when history exists. If the process restarts, classification, Sentinel inspect, and the dashboard all rehydrate from the store; RAM is not a second source of truth when Neo4j is enabled.
 
 Everything the pipeline still derives locally from ActionGraph nodes stamped with `run_id`:
 
@@ -42,7 +43,7 @@ Everything the pipeline still derives locally from ActionGraph nodes stamped wit
 - `graph.key_nodes(run_id)` — the run's *flagged* nodes (level ≥ 1) in insertion order; this is the `long_term` array handed to `jev` ([Jev.md](Jev.md)). All nodes, benign included, are `run_nodes(run_id)`.
 - `graph.actionable_level(run_id)` — the max level among nodes whose `threshold` clears the action gate. A low-confidence L3 is recorded (the run level still reads L3) but does not fire a playbook until a confident verdict confirms it.
 
-`append(run_id, …)` chains a new node under the run's last node with id `{run_id}:{seq}`; `connect(src, dst)` adds extra edges between existing nodes (this is how loops form); `update(node_id, **fields)` is how the dispatcher later stamps `action_id` on a node that fired a playbook; `clear()` resets the instance in place (a human clearing them from the viewer, [Actions.md](Actions.md)).
+`append(run_id, …)` chains a new action under the run's last node. New actions reuse an existing node when their signature matches, increasing `visit_count` and adding the run to `run_ids`; `connect(src, dst)` adds extra edges between existing nodes (this is how cycles form); `update(node_id, **fields)` is how the dispatcher later stamps `action_id` on a node that fired a playbook; `clear()` resets the instance in place (a human clearing them from the viewer, [Actions.md](Actions.md)).
 
 ### Live stream
 

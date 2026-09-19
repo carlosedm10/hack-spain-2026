@@ -7,6 +7,7 @@ import httpx
 
 from app.actions.models import DispatchAccepted
 from app.classification import pipeline
+from app.classification.models import Level
 from app.dispatch import dispatcher
 from app.events import EventPhase, MonitorEvent, normalize_event, redact_event
 from app.graph import graph
@@ -79,7 +80,6 @@ async def ingest(
     prepared = monitor.prepare(normalized)
     try:
         before_level = graph.level(run_id)
-        before_nodes = len(graph.run_nodes(run_id))
         verdict = await pipeline.evaluate(
             client,
             run_id,
@@ -89,24 +89,23 @@ async def ingest(
     finally:
         if owned:
             await client.aclose()
-    nodes = graph.run_nodes(run_id)
     assessment = monitor.finalize(normalized, verdict, before_level, prepared)
     actions = dispatcher.handle(normalized, assessment)
     assessment.dispatch_actions = [action.model_dump(mode="json") for action in actions]
-    node_id = nodes[-1].id if len(nodes) > before_nodes else None
     effective_level = max(before_level, verdict.level, assessment.gate.incident_level)
-    if node_id:
-        if effective_level > graph.get_node(node_id).level:
-            graph.update(node_id, level=effective_level)
-    elif effective_level > graph.level(run_id):
-        node_id = graph.append(
+    action_node = graph.last_action(run_id)
+    if action_node is None and effective_level > Level.NONE:
+        action_node = graph.append(
             run_id,
             level=effective_level,
             threshold=verdict.confidence,
             intent=verdict.intent,
             event=normalized_payload,
             action_id=None,
-        ).id
+        )
+    node_id = action_node.id if action_node is not None else None
+    if action_node is not None and effective_level > action_node.level:
+        graph.update(node_id, level=effective_level)
 
     incident_level = int(assessment.gate.incident_level)
     if (

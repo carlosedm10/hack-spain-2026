@@ -316,6 +316,8 @@ export function getDemoFrame(tick: number) {
     neighbors: [],
     threshold: 0,
     run_id: id === "root" ? null : id.slice(4),
+    run_ids: id === "root" ? [] : [id.slice(4)],
+    visit_count: 1,
     level: 0,
     intent: null,
     event: null,
@@ -333,6 +335,8 @@ export function getDemoFrame(tick: number) {
       neighbors: [],
       threshold: event.confidence,
       run_id: event.run,
+      run_ids: [event.run],
+      visit_count: 1,
       level: event.level,
       intent: event.intent,
       event: {

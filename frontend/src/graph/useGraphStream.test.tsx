@@ -30,12 +30,14 @@ function mount(node: ReactNode) {
   act(() => root.render(node));
 }
 
-function node(id: string, neighbors: string[] = []) {
+function node(id: string, neighbors: string[] = [], runId: string | null = null) {
   return {
     id,
     neighbors,
     threshold: 0,
-    run_id: null,
+    run_id: runId,
+    run_ids: runId ? [runId] : [],
+    visit_count: 1,
     level: 0,
     intent: null,
     event: null,
@@ -166,10 +168,9 @@ describe("App", () => {
       root: "root",
       nodes: [
         node("root", ["run:r1"]),
-        { ...node("run:r1", ["root", "r1:1"]), run_id: "r1" },
+        node("run:r1", ["root", "r1:1"], "r1"),
         {
-          ...node("r1:1", ["run:r1"]),
-          run_id: "r1",
+          ...node("r1:1", ["run:r1"], "r1"),
           level: 2,
           threshold: 0.9,
           event: { label: "Read file" },
@@ -190,8 +191,7 @@ describe("App", () => {
       root: "root",
       upsert_nodes: [
         {
-          ...node("r1:1", ["run:r1"]),
-          run_id: "r1",
+          ...node("r1:1", ["run:r1"], "r1"),
           level: 3,
           threshold: 0.9,
           event: { label: "Read file" },

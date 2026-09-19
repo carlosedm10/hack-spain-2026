@@ -3,6 +3,8 @@ export type GraphNode = {
   neighbors: string[];
   threshold: number;
   run_id: string | null;
+  run_ids: string[];
+  visit_count: number;
   level: number;
   intent: string | null;
   event: Record<string, unknown> | null;
@@ -38,7 +40,9 @@ function isNode(value: unknown): value is GraphNode {
     isRecord(value) &&
     typeof value.id === "string" &&
     Array.isArray(value.neighbors) &&
-    value.neighbors.every((id) => typeof id === "string")
+    value.neighbors.every((id) => typeof id === "string") &&
+    (value.run_ids === undefined || Array.isArray(value.run_ids)) &&
+    (value.visit_count === undefined || typeof value.visit_count === "number")
   );
 }
 
@@ -92,11 +96,19 @@ export function parseUpdate(raw: string): GraphUpdate | null {
   };
 }
 
+function normalizeNode(node: GraphNode): GraphNode {
+  return {
+    ...node,
+    run_ids: node.run_ids ?? (node.run_id ? [node.run_id] : []),
+    visit_count: node.visit_count ?? 1,
+  };
+}
+
 export function fromSnapshot(snapshot: GraphSnapshot): Graph {
   return {
     revision: snapshot.revision,
     root: snapshot.root,
-    nodes: new Map(snapshot.nodes.map((node) => [node.id, node])),
+    nodes: new Map(snapshot.nodes.map((node) => [node.id, normalizeNode(node)])),
   };
 }
 
@@ -109,7 +121,7 @@ export function applyUpdate(graph: Graph, update: GraphUpdate): Graph | null {
     nodes.delete(id);
   }
   for (const node of update.upsert_nodes) {
-    nodes.set(node.id, node);
+    nodes.set(node.id, normalizeNode(node));
   }
   return { revision: update.revision, root: update.root, nodes };
 }

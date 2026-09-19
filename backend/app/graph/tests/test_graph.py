@@ -461,7 +461,7 @@ class TestRunPersistence:
         n1 = g.append(
             "r", level=Level.MILD, threshold=0.9, intent="recon", event={"event": "file_read"}
         )
-        g.append("r", level=Level.SEVERE, threshold=0.8, action_id="a1")
+        n2 = g.append("r", level=Level.SEVERE, threshold=0.8, action_id="a1")
 
         path = tmp_path / "graph.json"
         g.save(path)
@@ -469,8 +469,9 @@ class TestRunPersistence:
         restored.load(path)
 
         run_node = restored.get_node("run:r")
-        r1 = restored.get_node("r:1")
-        r2 = restored.get_node("r:2")
+        r1 = restored.get_node(n1.id)
+        r2 = restored.get_node(n2.id)
+        assert r1 is not None and r2 is not None
         assert r1.run_id == "r" and r2.run_id == "r"
         assert r1.level == Level.MILD and r2.level == Level.SEVERE
         assert r1.intent == "recon"
@@ -481,7 +482,7 @@ class TestRunPersistence:
         assert r1.neighbors == [run_node, r2]
         assert r2.neighbors == [r1]
         assert restored.level("r") == Level.SEVERE
-        assert [n.id for n in restored.key_nodes("r")] == ["r:1", "r:2"]
+        assert [n.id for n in restored.key_nodes("r")] == [n1.id, n2.id]
 
     def test_save_load_roundtrip_preserves_created_at_on_update(self, g: ActionGraph, tmp_path):
         node = g.append("r", level=Level.MILD, threshold=0.9)

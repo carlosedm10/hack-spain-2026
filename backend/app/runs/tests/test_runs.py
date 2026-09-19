@@ -99,6 +99,7 @@ class TestPostEvents:
 
         assert response.status_code == 200
         body = response.json()
+        node_id = body["node_id"]
         assert {
             key: body[key]
             for key in (
@@ -107,7 +108,6 @@ class TestPostEvents:
                 "intent",
                 "escalated",
                 "degraded",
-                "node_id",
             )
         } == {
             "level": 2,
@@ -115,14 +115,14 @@ class TestPostEvents:
             "intent": None,
             "escalated": True,
             "degraded": False,
-            "node_id": "demo:1",
         }
+        assert node_id
         assert body["event_id"]
         assert body["decision"] == "allow"
         assert body["duplicate"] is False
         assert (tape_dir / "demo.jsonl").exists()
         assert graph.level("demo") == Level.MODERATE
-        assert graph.get_node("demo:1").action_id == "demo:tag_run"
+        assert graph.get_node(node_id).action_id == "demo:tag_run"
 
 
     async def test_same_level_does_not_re_dispatch(self, client: AsyncClient, fresh, mock_jev, monkeypatch):
@@ -132,10 +132,12 @@ class TestPostEvents:
         first = await client.post("/api/runs/demo/events", json={"event": "file_read"})
         second = await client.post("/api/runs/demo/events", json={"event": "shell_command"})
 
+        first_id = first.json()["node_id"]
+        second_id = second.json()["node_id"]
         assert first.json()["escalated"] is True
         assert second.json()["escalated"] is False
-        assert graph.get_node("demo:1").action_id == "demo:tag_run"
-        assert graph.get_node("demo:2").action_id is None
+        assert graph.get_node(first_id).action_id == "demo:tag_run"
+        assert graph.get_node(second_id).action_id is None
 
 
     async def test_degraded_verdict_does_not_dispatch(self, client: AsyncClient, fresh, tape_dir, monkeypatch):
@@ -156,8 +158,11 @@ class TestPostEvents:
         first = await client.post("/api/runs/demo/events", json={"event": "file_read"})
         second = await client.post("/api/runs/demo/events", json={"event": "shell_command"})
 
-        assert first.json()["node_id"] == "demo:1"
-        assert second.json()["node_id"] == "demo:2"
+        first_id = first.json()["node_id"]
+        second_id = second.json()["node_id"]
+        assert first_id
+        assert second_id
+        assert first_id != second_id
 
     async def test_benign_verdict_materializes_l0_node(
         self, client: AsyncClient, fresh, mock_jev, monkeypatch
@@ -168,10 +173,11 @@ class TestPostEvents:
         response = await client.post("/api/runs/demo/events", json={"event": "file_read"})
 
         body = response.json()
+        node_id = body["node_id"]
         assert body["level"] == 0
         assert body["escalated"] is False
-        assert body["node_id"] == "demo:1"
-        assert graph.get_node("demo:1").level == Level.NONE
+        assert node_id
+        assert graph.get_node(node_id).level == Level.NONE
         assert graph.key_nodes("demo") == []
 
     async def test_missing_api_key_returns_clean_degraded_verdict_not_500(
@@ -262,7 +268,8 @@ class TestGetRuns:
 
         body = response.json()
         assert body["level"] == 3
-        assert [n["id"] for n in body["key_nodes"]] == ["demo:2"]
+        assert len(body["key_nodes"]) == 1
+        assert body["key_nodes"][0]["level"] == 3
         assert body["key_nodes"][0]["threshold"] == 0.9
 
     async def test_list_runs_includes_taped_runs(

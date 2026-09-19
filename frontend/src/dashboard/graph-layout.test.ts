@@ -12,6 +12,8 @@ function node(
   return {
     id,
     run_id: runId,
+    run_ids: runId ? [runId] : [],
+    visit_count: 1,
     neighbors,
     level,
     threshold: 0.99,
@@ -38,8 +40,19 @@ const pending: PendingAction = {
   tool: "shell",
   created_at: "2026-01-01T00:00:00Z",
 };
-const snapshot = (nodes: GraphNode[]) =>
-  fromSnapshot({ revision: 1, root: nodes.length ? "root" : null, nodes });
+const snapshot = (nodes: GraphNode[]) => {
+  const graph = fromSnapshot({ revision: 1, root: nodes.length ? "root" : null, nodes });
+  // Wire undirected edges so the test fixtures match the backend's mutual neighbor lists.
+  for (const node of graph.nodes.values()) {
+    for (const neighborId of node.neighbors) {
+      const neighbor = graph.nodes.get(neighborId);
+      if (neighbor && !neighbor.neighbors.includes(node.id)) {
+        neighbor.neighbors.push(node.id);
+      }
+    }
+  }
+  return graph;
+};
 const initial = () =>
   snapshot([
     node("root", null, ["run:atlas", "run:scout"]),
@@ -68,13 +81,13 @@ describe("activity graph layout", () => {
     expect(layoutGraph(graph, null)).toEqual(result);
   });
 
-  test("keeps distinct run columns and existing positions stable as actions and runs arrive", () => {
+  test("places nodes by graph depth and keeps existing positions stable as actions and runs arrive", () => {
     const graph = initial();
     const before = layoutGraph(graph, null);
     const atlas = before.nodes.find((item) => item.id === "atlas:1")!;
     const scout = before.nodes.find((item) => item.id === "scout:1")!;
-    expect(atlas.position.x).not.toBe(scout.position.x);
-    expect(atlas.position.y).toBe(scout.position.y);
+    expect(atlas.position.x).toBe(scout.position.x);
+    expect(atlas.position.y).not.toBe(scout.position.y);
     graph.nodes.set(
       "atlas:2",
       node("atlas:2", "atlas", ["atlas:1", "scout:1"]),
@@ -86,9 +99,8 @@ describe("activity graph layout", () => {
         item.position,
       );
     }
-    expect(
-      after.nodes.find((item) => item.id === "atlas:2")!.position.y,
-    ).toBeGreaterThan(atlas.position.y);
+    const atlas2 = after.nodes.find((item) => item.id === "atlas:2")!;
+    expect(atlas2.position.x).toBeGreaterThan(atlas.position.x);
   });
 
   test("pending and structural nodes carry no verdict; confidence does not determine severity", () => {
@@ -117,6 +129,7 @@ describe("activity graph layout", () => {
       ...node(pending.id, "atlas", [pending.parentId], 3),
       threshold: 0.35,
     });
+    graph.nodes.get(pending.parentId)!.neighbors.push(pending.id);
     const classified = layoutGraph(graph, pending);
     expect(
       classified.nodes.filter((item) => item.id === pending.id),

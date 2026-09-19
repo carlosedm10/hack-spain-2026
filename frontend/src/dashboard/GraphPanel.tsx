@@ -5,7 +5,7 @@ import {
   ReactFlow,
   type Edge,
 } from "@xyflow/react";
-import { RotateCcw, Workflow } from "lucide-react";
+import { Play, RotateCcw, Workflow } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 
 import {
@@ -29,6 +29,7 @@ export type GraphPanelProps = {
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   onRestart?: () => void;
+  onTrigger?: () => void;
   status?: GraphStreamStatus | null;
 };
 
@@ -44,6 +45,7 @@ export function GraphPanel({
   selectedNodeId,
   onSelectNode,
   onRestart,
+  onTrigger,
   status = null,
 }: GraphPanelProps) {
   const reducedMotion = useReducedMotion();
@@ -126,6 +128,17 @@ export function GraphPanel({
               />
               {pill.text}
             </span>
+          )}
+          {onTrigger && (
+            <Button
+              variant="default"
+              size="sm"
+              aria-label="Trigger a live demo run"
+              onClick={onTrigger}
+            >
+              <Play aria-hidden="true" />
+              Trigger run
+            </Button>
           )}
           {onRestart && (
             <Button
